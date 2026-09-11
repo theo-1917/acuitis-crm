@@ -25,7 +25,7 @@ const COLUMNS = ["Nouveau", "Contacté", "RDV", "Non qualifié", "Perdu"]
 
 const PROVENANCES = [
   "Prospection téléphonique", "Site internet", "Contact SILMO", 
-  "Coptation", "Bouche à oreille", "L'express franchise", 
+  "Cooptation", "Bouche à oreille", "L'express franchise", 
   "Recruteur", "Prospection linkedin", "Mailing", "Autre"
 ]
 
@@ -70,12 +70,13 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Correction de la création d'emplacement (type_zone à null)
+  // Conversion : Création de la recherche + Sortie du pipeline + Statut "En recherche"
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
 
-    const { error } = await supabase.from("emplacements").insert([{
+    // 1. Création de la recherche d'emplacement
+    const { error: emplError } = await supabase.from("emplacements").insert([{
       prospect_id: p.id,
       villes_recherchees: villes,
       statut_recherche: "en_recherche",
@@ -83,8 +84,21 @@ export function ProspectsPipeline() {
       surface_souhaitee_m2: 0
     }])
 
-    if (!error) alert(`La recherche d'emplacement pour ${p.name} a été créée avec succès !`)
-    else alert("Erreur lors de la création de la recherche : " + error.message)
+    if (emplError) {
+      alert("Erreur lors de la création de la recherche : " + emplError.message)
+      return
+    }
+
+    // 2. Mise à jour du prospect : marqué "En recherche" et masqué du pipeline actif
+    const { error: prospectError } = await supabase.from("prospects").update({
+      statut: "En recherche",
+      actif: false
+    }).eq("id", p.id)
+
+    if (!prospectError) {
+      alert(`Félicitations ! ${p.name} est validé et passe en Recherche d'emplacement.`)
+      fetchProspects()
+    }
   }
 
   const handleDelete = async (id: number) => {
@@ -138,10 +152,12 @@ export function ProspectsPipeline() {
     document.body.removeChild(link)
   }
 
+  // EXPORT RAPPORT KPI : Distingue les Validés (Convertis) des Perdus
   const handleExportKPI = () => {
     const total = prospects.length
     const actifs = prospects.filter(p => p.actif).length
-    const inactifs = total - actifs
+    const valides = prospects.filter(p => p.statut === "En recherche").length
+    const perdus = prospects.filter(p => p.statut === "Non qualifié" || p.statut === "Perdu").length
 
     const prospectsByMonthYear: Record<string, Prospect[]> = {}
     prospects.forEach(p => {
@@ -153,13 +169,14 @@ export function ProspectsPipeline() {
     })
 
     const sortedMonthKeys = Object.keys(prospectsByMonthYear).sort()
+    const allStatutKeys = [...COLUMNS, "En recherche"]
 
-    const statusByMonthHeader = `Période (Mois/Année);${COLUMNS.join(";")};Total`
+    const statusByMonthHeader = `Période (Mois/Année);${allStatutKeys.join(";")};Total`
     const statusByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
       const [year, month] = key.split('-')
       const monthLabel = new Date(Number(year), Number(month) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-      const counts = COLUMNS.map(col => list.filter(p => (p.statut || "Nouveau") === col).length)
+      const counts = allStatutKeys.map(col => list.filter(p => (p.statut || "Nouveau") === col).length)
       return `"${monthLabel}";${counts.join(';')};${list.length}`
     })
 
@@ -176,12 +193,14 @@ export function ProspectsPipeline() {
       "RAPPORT ANALYTIQUE ET KPI - DÉVELOPPEMENT RÉSEAU ACUITIS",
       `Date de l'export;${new Date().toLocaleDateString("fr-FR")}`,
       "",
-      "--- 1. INDICATEURS CLÉS GLOBAUX ---",
-      `Total des candidatures enregistrées;${total}`,
-      `Candidats actifs en cours de suivi;${actifs}`,
-      `Candidats inactifs (Non qualifiés / Perdus / Archivés);${inactifs}`,
+      "--- 1. INDICATEURS CLÉS ET CONVERSION ---",
+      `Total des candidatures reçues;${total}`,
+      `Candidats en cours de qualification (Pipeline actif);${actifs}`,
+      `CANDIDATS VALIDÉS (Convertis en Recherche d'emplacement);${valides}`,
+      `Candidats non retenus (Non qualifiés / Perdus);${perdus}`,
+      `Taux de transformation global;${total > 0 ? ((valides / total) * 100).toFixed(1) + "%" : "0%"}`,
       "",
-      "--- 2. RÉPARTITION DES STATUTS PAR MOIS ET ANNÉE ---",
+      "--- 2. VENTILATION DES STATUTS PAR MOIS ET ANNÉE ---",
       statusByMonthHeader,
       ...statusByMonthLines,
       "",
@@ -194,7 +213,7 @@ export function ProspectsPipeline() {
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement("a")
     link.href = encodedUri
-    link.download = `rapport_kpi_mensuel_${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `rapport_kpi_conversion_${new Date().toISOString().slice(0, 10)}.csv`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -226,7 +245,7 @@ export function ProspectsPipeline() {
 
           <Button variant="outline" size="sm" onClick={() => setShowInactive(!showInactive)} className="text-xs">
             {showInactive ? <EyeOff className="mr-2 h-3.5 w-3.5" /> : <Eye className="mr-2 h-3.5 w-3.5" />}
-            {showInactive ? "Masquer Inactifs" : "Voir Inactifs"}
+            {showInactive ? "Masquer Inactifs / Validés" : "Voir Inactifs / Validés"}
           </Button>
           
           <Button size="sm" onClick={() => { setEditingId(null); setFormData({ statut: "Nouveau", actif: true, provenance: "Site internet" }); setShowModal(true) }}>
@@ -283,7 +302,7 @@ export function ProspectsPipeline() {
                           variant="ghost" 
                           size="sm" 
                           className="h-6 w-6 p-0 text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10" 
-                          title="Lancer une recherche d'emplacement"
+                          title="Valider et lancer la recherche d'emplacement"
                           onClick={() => handlePasserEnRecherche(p)}
                         >
                           <Map className="h-3.5 w-3.5" />
@@ -307,7 +326,7 @@ export function ProspectsPipeline() {
 
                     {p.actif === false && (
                       <div className="mt-1 bg-muted/50 text-[10px] text-center p-1 rounded text-muted-foreground">
-                        Prospect archivé (Inactif)
+                        {p.statut === "En recherche" ? "✓ Candidat Validé (En recherche)" : "Prospect archivé (Inactif)"}
                       </div>
                     )}
                   </div>
@@ -364,6 +383,7 @@ export function ProspectsPipeline() {
                       className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground"
                     >
                       {COLUMNS.map(c => <option key={c} value={c}>{c}</option>)}
+                      <option value="En recherche">En recherche (Validé)</option>
                     </select>
                 </div>
                 <div>
@@ -386,7 +406,7 @@ export function ProspectsPipeline() {
                     onChange={(e) => setFormData({...formData, actif: e.target.checked})}
                     className="rounded border-border accent-primary"
                   />
-                  <label htmlFor="actif-checkbox" className="text-xs text-foreground cursor-pointer">Prospect Actif (Visible dans les statistiques)</label>
+                  <label htmlFor="actif-checkbox" className="text-xs text-foreground cursor-pointer">Prospect Actif (Visible dans le pipeline)</label>
               </div>
               
               <div className="flex justify-end gap-2 pt-4 border-t border-border">
