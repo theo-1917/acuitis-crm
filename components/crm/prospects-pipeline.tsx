@@ -70,12 +70,17 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Conversion : Création de la recherche + Sortie du pipeline + Statut "En recherche"
+  // CORRECTION ICI : Mise à jour visuelle instantanée (Optimistic Update)
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
 
-    // 1. Création de la recherche d'emplacement
+    // 1. Mise à jour immédiate de l'interface visuelle pour l'utilisateur
+    setProspects(current => current.map(prov => 
+      prov.id === p.id ? { ...prov, statut: "En recherche", actif: false } : prov
+    ))
+
+    // 2. Création de la recherche d'emplacement en base
     const { error: emplError } = await supabase.from("emplacements").insert([{
       prospect_id: p.id,
       villes_recherchees: villes,
@@ -86,18 +91,21 @@ export function ProspectsPipeline() {
 
     if (emplError) {
       alert("Erreur lors de la création de la recherche : " + emplError.message)
+      fetchProspects() // En cas d'erreur, on remet l'état initial
       return
     }
 
-    // 2. Mise à jour du prospect : marqué "En recherche" et masqué du pipeline actif
+    // 3. Mise à jour silencieuse du prospect en base
     const { error: prospectError } = await supabase.from("prospects").update({
       statut: "En recherche",
       actif: false
     }).eq("id", p.id)
 
-    if (!prospectError) {
-      alert(`Félicitations ! ${p.name} est validé et passe en Recherche d'emplacement.`)
-      fetchProspects()
+    if (prospectError) {
+      alert("Erreur de mise à jour du statut : " + prospectError.message)
+      fetchProspects() // Rollback en cas d'erreur
+    } else {
+      alert(`Félicitations ! ${p.name} est validé et transféré en Recherche d'emplacement.`)
     }
   }
 
@@ -152,7 +160,6 @@ export function ProspectsPipeline() {
     document.body.removeChild(link)
   }
 
-  // EXPORT RAPPORT KPI : Distingue les Validés (Convertis) des Perdus
   const handleExportKPI = () => {
     const total = prospects.length
     const actifs = prospects.filter(p => p.actif).length
@@ -221,7 +228,10 @@ export function ProspectsPipeline() {
 
   if (loading) return <div className="p-4 text-muted-foreground">Chargement du pipeline...</div>
 
-  const displayedProspects = showInactive ? prospects : prospects.filter(p => p.actif !== false)
+  // On exclut les prospects qui ont le statut "En recherche" (à moins de cliquer sur le bouton Inactifs)
+  const displayedProspects = showInactive 
+    ? prospects 
+    : prospects.filter(p => p.actif !== false && p.statut !== "En recherche")
 
   return (
     <div className="flex flex-col gap-6 h-[calc(100vh-140px)]">
