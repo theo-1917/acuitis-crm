@@ -41,6 +41,10 @@ type Dossier = {
   zone_premier_refus: string
   commentaire: string
   statut_dossier: string
+  adresse_local: string
+  surface_local: number
+  loyer: number
+  charges: number
   dip_signe_url: string
   roi_url: string
   kbis_url: string
@@ -48,6 +52,7 @@ type Dossier = {
   etude_zone_url: string
   devis_travaux_url: string
   bail_signe_url: string
+  autres_documents_url: string
   prospects?: Prospect
 }
 
@@ -130,6 +135,10 @@ export function Dossiers() {
         zone_exclusivite: currentDossier.zone_exclusivite || "",
         zone_premier_refus: currentDossier.zone_premier_refus || "",
         commentaire: currentDossier.commentaire || "",
+        adresse_local: currentDossier.adresse_local || "",
+        surface_local: currentDossier.surface_local || 0,
+        loyer: currentDossier.loyer || 0,
+        charges: currentDossier.charges || 0,
       })
       .eq("id", selectedDossierId)
 
@@ -208,8 +217,8 @@ export function Dossiers() {
     }
   }
 
-  // 7 documents officiels dans le Coffre-fort
-  const docKeys: { key: keyof Dossier; label: string }[] = [
+  // 7 documents officiels obligatoires + 1 optionnel
+  const mandatoryDocKeys: { key: keyof Dossier; label: string }[] = [
     { key: "dip_signe_url", label: "DIP signé" },
     { key: "roi_url", label: "ROI" },
     { key: "kbis_url", label: "Kbis" },
@@ -218,7 +227,10 @@ export function Dossiers() {
     { key: "devis_travaux_url", label: "Devis travaux" },
     { key: "bail_signe_url", label: "Bail signé" },
   ]
-  const docsUploadedCount = docKeys.filter(({ key }) => !!currentDossier[key]).length
+  const optionalDocKey = { key: "autres_documents_url" as keyof Dossier, label: "Autres documents (Optionnel)" }
+  
+  const allDocKeys = [...mandatoryDocKeys, optionalDocKey]
+  const docsUploadedCount = mandatoryDocKeys.filter(({ key }) => !!currentDossier[key]).length
   const isFullyValidated = currentDossier.statut_dossier === "Validé"
 
   if (loading) {
@@ -455,7 +467,7 @@ export function Dossiers() {
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">
-                    Honoraires / Droit d'entrée (€)
+                    Honoraires d'entrée (€)
                   </label>
                   <Input
                     type="number"
@@ -467,6 +479,43 @@ export function Dossiers() {
                       })
                     }
                     placeholder="45000"
+                    className="text-xs"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Loyer (€/an)
+                  </label>
+                  <Input
+                    type="number"
+                    value={currentDossier.loyer || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({
+                        ...currentDossier,
+                        loyer: Number(e.target.value),
+                      })
+                    }
+                    placeholder="35000"
+                    className="text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Charges (€/an)
+                  </label>
+                  <Input
+                    type="number"
+                    value={currentDossier.charges || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({
+                        ...currentDossier,
+                        charges: Number(e.target.value),
+                      })
+                    }
+                    placeholder="3000"
                     className="text-xs"
                   />
                 </div>
@@ -505,11 +554,41 @@ export function Dossiers() {
               </div>
             </div>
 
-            {/* BLOC 3 : Territoire & Commentaires */}
+            {/* BLOC 3 : Local, Territoire & Commentaires */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <div className="flex items-center gap-2 border-b border-border pb-3">
                 <Map className="h-4 w-4 text-primary" />
-                <h3 className="font-semibold text-foreground text-sm">Territoire & Notes</h3>
+                <h3 className="font-semibold text-foreground text-sm">Local & Territoire</h3>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Adresse complète du local
+                  </label>
+                  <Input
+                    value={currentDossier.adresse_local || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({ ...currentDossier, adresse_local: e.target.value })
+                    }
+                    placeholder="ex: 14 Rue de la République..."
+                    className="text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Surface (m²)
+                  </label>
+                  <Input
+                    type="number"
+                    value={currentDossier.surface_local || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({ ...currentDossier, surface_local: Number(e.target.value) })
+                    }
+                    placeholder="85"
+                    className="text-xs"
+                  />
+                </div>
               </div>
 
               <div>
@@ -556,7 +635,7 @@ export function Dossiers() {
               </div>
             </div>
 
-            {/* BLOC 4 : Coffre-fort Documentaire (7 documents) */}
+            {/* BLOC 4 : Coffre-fort Documentaire */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <div className="flex items-center gap-2">
@@ -569,12 +648,15 @@ export function Dossiers() {
               </div>
 
               <div className="space-y-2">
-                {docKeys.map(({ key, label }) => {
+                {allDocKeys.map(({ key, label }) => {
                   const url = currentDossier[key]
+                  const isOptional = key === "autres_documents_url"
                   return (
                     <div
                       key={key}
-                      className="flex items-center justify-between p-2 rounded-lg border border-border bg-background text-xs"
+                      className={`flex items-center justify-between p-2 rounded-lg border text-xs ${
+                        isOptional ? "border-dashed border-border/60 bg-muted/20" : "border-border bg-background"
+                      }`}
                     >
                       <div className="flex items-center gap-2">
                         <CheckCircle2
@@ -582,7 +664,9 @@ export function Dossiers() {
                             url ? "text-emerald-500" : "text-muted-foreground/30"
                           }`}
                         />
-                        <span className="font-medium text-foreground">{label}</span>
+                        <span className={`font-medium ${isOptional ? "text-muted-foreground italic" : "text-foreground"}`}>
+                          {label}
+                        </span>
                       </div>
 
                       <div className="flex items-center gap-2">
