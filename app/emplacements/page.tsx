@@ -62,7 +62,7 @@ export default function EmplacementsPage() {
     }
 
     const headers = ["Villes recherchees", "Type de zone", "Timing projet", "Surface souhaitee (m2)"];
-    
+
     const rows = data.map((item) => [
       `"${item.villes_recherchees || ""}"`,
       `"${item.type_zone || ""}"`,
@@ -170,3 +170,4 @@ export default function EmplacementsPage() {
       </div>
     </div>
   );
+}
