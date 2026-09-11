@@ -1,284 +1,532 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
-  CalendarDays,
+  Calendar,
   CheckCircle2,
-  Circle,
   FileText,
+  FolderKanban,
   Landmark,
-  MapPinned,
-  Phone,
+  Map,
+  Plus,
   Upload,
+  User,
 } from "lucide-react"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { cn } from "@/lib/utils"
-import { dossiers, dossierStatutMeta, formatEuro } from "@/lib/crm-data"
+import { supabase } from "@/lib/supabase"
+
+type Prospect = {
+  id: number
+  name: string
+  ville: string
+  telephone: string
+  email: string
+  apport: number
+}
+
+type Dossier = {
+  id: number
+  prospect_id: number
+  agent_broker: string
+  date_prise_bail: string
+  date_ouverture_prevue: string
+  honoraires_droit_entree: number
+  nom_banque: string
+  statut_financement: string
+  zone_exclusivite: string
+  zone_premier_refus: string
+  dip_signe_url: string
+  roi_url: string
+  kbis_url: string
+  rib_url: string
+  etude_zone_url: string
+  devis_travaux_url: string
+  prospects?: Prospect
+}
 
 export function Dossiers() {
-  const [selectedId, setSelectedId] = useState(dossiers[0].id)
-  const dossier = dossiers.find((d) => d.id === selectedId) ?? dossiers[0]
+  const [dossiers, setDossiers] = useState<Dossier[]>([])
+  const [prospectsWithoutDossier, setProspectsWithoutDossier] = useState<Prospect[]>([])
+  const [selectedDossierId, setSelectedDossierId] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  // Données du dossier sélectionné
+  const [currentDossier, setCurrentDossier] = useState<Partial<Dossier>>({})
+
+  const loadData = async () => {
+    setLoading(true)
+    const { data: dossiersData } = await supabase
+      .from("dossiers")
+      .select("*, prospects(*)")
+
+    const { data: prospectsData } = await supabase
+      .from("prospects")
+      .select("*")
+
+    if (dossiersData && dossiersData.length > 0) {
+      setDossiers(dossiersData)
+      if (!selectedDossierId) {
+        setSelectedDossierId(dossiersData[0].id)
+        setCurrentDossier(dossiersData[0])
+      } else {
+        const found = dossiersData.find((d) => d.id === selectedDossierId)
+        if (found) setCurrentDossier(found)
+      }
+    }
+
+    if (prospectsData && dossiersData) {
+      const existingIds = dossiersData.map((d) => d.prospect_id)
+      setProspectsWithoutDossier(prospectsData.filter((p) => !existingIds.includes(p.id)))
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const handleSelectDossier = (dossier: Dossier) => {
+    setSelectedDossierId(dossier.id)
+    setCurrentDossier(dossier)
+  }
+
+  const handleCreateDossier = async (prospectId: number) => {
+    const { data, error } = await supabase
+      .from("dossiers")
+      .insert([{ prospect_id: prospectId, statut_financement: "En cours" }])
+      .select("*, prospects(*)")
+
+    if (!error && data && data[0]) {
+      await loadData()
+      setSelectedDossierId(data[0].id)
+      setCurrentDossier(data[0])
+    } else if (error) {
+      alert("Erreur lors de la création du dossier : " + error.message)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!selectedDossierId) return
+    setSaving(true)
+
+    const { error } = await supabase
+      .from("dossiers")
+      .update({
+        agent_broker: currentDossier.agent_broker || "",
+        date_prise_bail: currentDossier.date_prise_bail || null,
+        date_ouverture_prevue: currentDossier.date_ouverture_prevue || null,
+        honoraires_droit_entree: currentDossier.honoraires_droit_entree || 0,
+        nom_banque: currentDossier.nom_banque || "",
+        statut_financement: currentDossier.statut_financement || "En cours",
+        zone_exclusivite: currentDossier.zone_exclusivite || "",
+        zone_premier_refus: currentDossier.zone_premier_refus || "",
+      })
+      .eq("id", selectedDossierId)
+
+    setSaving(false)
+    if (!error) {
+      await loadData()
+      alert("Modifications enregistrées avec succès !")
+    } else {
+      alert("Erreur lors de la sauvegarde : " + error.message)
+    }
+  }
+
+  const handleFileUpload = async (fileKey: keyof Dossier, file: File) => {
+    if (!selectedDossierId) return
+
+    const fileExt = file.name.split(".").pop()
+    const filePath = `dossier_${selectedDossierId}/${String(fileKey)}_${Date.now()}.${fileExt}`
+
+    const { error: uploadError } = await supabase.storage
+      .from("documents")
+      .upload(filePath, file, { upsert: true })
+
+    if (uploadError) {
+      alert("Erreur d'envoi du fichier : " + uploadError.message)
+      return
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from("documents")
+      .getPublicUrl(filePath)
+
+    const publicUrl = publicUrlData.publicUrl
+
+    const { error: updateError } = await supabase
+      .from("dossiers")
+      .update({ [fileKey]: publicUrl })
+      .eq("id", selectedDossierId)
+
+    if (!updateError) {
+      setCurrentDossier((prev) => ({ ...prev, [fileKey]: publicUrl }))
+      await loadData()
+    } else {
+      alert("Erreur lors de la mise à jour du lien du document.")
+    }
+  }
+
+  // Calcul du nombre de documents validés (x/6)
+  const docKeys: (keyof Dossier)[] = [
+    "dip_signe_url",
+    "roi_url",
+    "kbis_url",
+    "rib_url",
+    "etude_zone_url",
+    "devis_travaux_url",
+  ]
+  const docsUploadedCount = docKeys.filter((k) => !!currentDossier[k]).length
+
+  if (loading) {
+    return <div className="p-6 text-sm text-muted-foreground">Chargement des dossiers…</div>
+  }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(260px,30%)_1fr]">
-      {/* Master list */}
-      <Card className="h-fit">
-        <CardHeader>
-          <CardTitle>Dossiers en cours</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-1.5">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      {/* Sidebar gauche : Liste des candidats */}
+      <div className="lg:col-span-3 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between border-b border-border pb-3">
+          <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
+            <FolderKanban className="h-4 w-4" /> Projets en cours
+          </h3>
+          <Badge variant="secondary">{dossiers.length}</Badge>
+        </div>
+
+        <div className="flex flex-col gap-2 overflow-y-auto max-h-[600px]">
           {dossiers.map((d) => {
-            const meta = dossierStatutMeta[d.statut]
-            const active = d.id === selectedId
+            const isSelected = d.id === selectedDossierId
             return (
               <button
                 key={d.id}
-                type="button"
-                onClick={() => setSelectedId(d.id)}
-                aria-current={active ? "true" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                  active
-                    ? "border-primary/40 bg-accent"
-                    : "border-transparent hover:bg-muted/60",
-                )}
+                onClick={() => handleSelectDossier(d)}
+                className={`flex items-center justify-between p-3 rounded-lg border text-left transition ${
+                  isSelected
+                    ? "border-primary bg-primary/10 text-foreground font-medium"
+                    : "border-border bg-background hover:bg-muted/50 text-muted-foreground"
+                }`}
               >
-                <Avatar className="size-9">
-                  <AvatarFallback
-                    className={cn(
-                      "text-xs font-semibold",
-                      active
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground",
-                    )}
-                  >
-                    {d.initiales}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {d.candidat}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {d.ville}
-                  </span>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted font-bold text-xs text-foreground">
+                    {d.prospects?.name?.substring(0, 2).toUpperCase() || "??"}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {d.prospects?.name || "Candidat sans nom"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {d.prospects?.ville || "Ville non précisée"}
+                    </div>
+                  </div>
                 </div>
-                <Badge
-                  variant="secondary"
-                  className={cn("shrink-0", meta.badgeClass)}
-                >
-                  {meta.label}
-                </Badge>
               </button>
             )
           })}
-        </CardContent>
-      </Card>
 
-      {/* Detail */}
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Avatar className="size-12">
-              <AvatarFallback className="bg-primary text-lg font-semibold text-primary-foreground">
-                {dossier.initiales}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                {dossier.candidat}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {dossier.ville} · {dossier.metier}
-              </p>
+          {dossiers.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-4">
+              Aucun dossier projet créé.
+            </p>
+          )}
+        </div>
+
+        {/* Option pour rattacher un candidat sans dossier */}
+        {prospectsWithoutDossier.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-border">
+            <label className="block text-xs font-medium text-muted-foreground mb-2">
+              Activer un dossier pour :
+            </label>
+            <select
+              onChange={(e) => {
+                if (e.target.value) handleCreateDossier(Number(e.target.value))
+              }}
+              className="w-full rounded-md border border-input bg-background p-2 text-xs text-foreground focus:outline-none"
+              defaultValue=""
+            >
+              <option value="" disabled>
+                -- Sélectionner un candidat --
+              </option>
+              {prospectsWithoutDossier.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.ville || "Sans ville"})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Zone principale : Les 4 blocs de la maquette */}
+      {selectedDossierId && currentDossier ? (
+        <div className="lg:col-span-9 flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-foreground">
+              Dossier de {currentDossier.prospects?.name}
+            </h2>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? "Enregistrement…" : "Sauvegarder les modifications"}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* BLOC 1 : Infos & Calendrier */}
+            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-border pb-3">
+                <Calendar className="h-4 w-4 text-primary" />
+                <h3 className="font-semibold text-foreground text-sm">Infos & Calendrier</h3>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Téléphone</label>
+                  <Input
+                    disabled
+                    value={currentDossier.prospects?.telephone || "-"}
+                    className="bg-muted/50 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Email</label>
+                  <Input
+                    disabled
+                    value={currentDossier.prospects?.email || "-"}
+                    className="bg-muted/50 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Agent / Broker</label>
+                <Input
+                  value={currentDossier.agent_broker || ""}
+                  onChange={(e) =>
+                    setCurrentDossier({ ...currentDossier, agent_broker: e.target.value })
+                  }
+                  placeholder="ex: Cushman & Wakefield"
+                  className="text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Date de prise de bail
+                  </label>
+                  <Input
+                    type="date"
+                    value={currentDossier.date_prise_bail || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({ ...currentDossier, date_prise_bail: e.target.value })
+                    }
+                    className="text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Date d'ouverture prévue
+                  </label>
+                  <Input
+                    type="date"
+                    value={currentDossier.date_ouverture_prevue || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({
+                        ...currentDossier,
+                        date_ouverture_prevue: e.target.value,
+                      })
+                    }
+                    className="text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* BLOC 2 : Finance & Contrat */}
+            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-border pb-3">
+                <Landmark className="h-4 w-4 text-primary" />
+                <h3 className="font-semibold text-foreground text-sm">Finance & Contrat</h3>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Apport (€)</label>
+                  <Input
+                    disabled
+                    value={currentDossier.prospects?.apport || 0}
+                    className="bg-muted/50 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Honoraires / Droit d'entrée (€)
+                  </label>
+                  <Input
+                    type="number"
+                    value={currentDossier.honoraires_droit_entree || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({
+                        ...currentDossier,
+                        honoraires_droit_entree: Number(e.target.value),
+                      })
+                    }
+                    placeholder="45000"
+                    className="text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Nom de la banque
+                  </label>
+                  <Input
+                    value={currentDossier.nom_banque || ""}
+                    onChange={(e) =>
+                      setCurrentDossier({ ...currentDossier, nom_banque: e.target.value })
+                    }
+                    placeholder="ex: BNP Paribas"
+                    className="text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Statut Financement
+                  </label>
+                  <select
+                    value={currentDossier.statut_financement || "En cours"}
+                    onChange={(e) =>
+                      setCurrentDossier({ ...currentDossier, statut_financement: e.target.value })
+                    }
+                    className="w-full rounded-md border border-input bg-background p-2 text-xs text-foreground focus:outline-none"
+                  >
+                    <option value="Oui">Oui (Accordé)</option>
+                    <option value="Non">Non (Refusé)</option>
+                    <option value="En cours">En cours de montage</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* BLOC 3 : Territoire */}
+            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-border pb-3">
+                <Map className="h-4 w-4 text-primary" />
+                <h3 className="font-semibold text-foreground text-sm">Territoire</h3>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Zone d'exclusivité
+                </label>
+                <Input
+                  value={currentDossier.zone_exclusivite || ""}
+                  onChange={(e) =>
+                    setCurrentDossier({ ...currentDossier, zone_exclusivite: e.target.value })
+                  }
+                  placeholder="ex: Lyon 6e — 2,5 km autour de la Place Bellecour"
+                  className="text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Zone de 1er refus
+                </label>
+                <Input
+                  value={currentDossier.zone_premier_refus || ""}
+                  onChange={(e) =>
+                    setCurrentDossier({ ...currentDossier, zone_premier_refus: e.target.value })
+                  }
+                  placeholder="ex: Lyon 3e et Villeurbanne centre"
+                  className="text-xs"
+                />
+              </div>
+            </div>
+
+            {/* BLOC 4 : Coffre-fort Documentaire */}
+            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" />
+                  <h3 className="font-semibold text-foreground text-sm">Coffre-fort Documentaire</h3>
+                </div>
+                <Badge variant={docsUploadedCount === 6 ? "default" : "secondary"}>
+                  {docsUploadedCount}/6
+                </Badge>
+              </div>
+
+              <div className="space-y-2">
+                {[
+                  { key: "dip_signe_url", label: "DIP signé" },
+                  { key: "roi_url", label: "ROI" },
+                  { key: "kbis_url", label: "Kbis" },
+                  { key: "rib_url", label: "RIB" },
+                  { key: "etude_zone_url", label: "Étude de zone" },
+                  { key: "devis_travaux_url", label: "Devis travaux" },
+                ].map(({ key, label }) => {
+                  const url = currentDossier[key as keyof Dossier]
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between p-2 rounded-lg border border-border bg-background text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2
+                          className={`h-4 w-4 ${
+                            url ? "text-emerald-500" : "text-muted-foreground/30"
+                          }`}
+                        />
+                        <span className="font-medium text-foreground">{label}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {url ? (
+                          <>
+                            <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">
+                              Validé
+                            </Badge>
+                            <a
+                              href={String(url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline text-[11px]"
+                            >
+                              Voir
+                            </a>
+                          </>
+                        ) : (
+                          <label className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1 font-medium">
+                            <Upload className="h-3 w-3" />
+                            <span>Ajouter</span>
+                            <input
+                              type="file"
+                              accept=".pdf,image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                if (file) handleFileUpload(key as keyof Dossier, file)
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
-          <Badge
-            variant="secondary"
-            className={cn(
-              "gap-1.5",
-              dossierStatutMeta[dossier.statut].badgeClass,
-            )}
-          >
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                dossierStatutMeta[dossier.statut].dot,
-              )}
-            />
-            {dossierStatutMeta[dossier.statut].label}
-          </Badge>
         </div>
-
-        <div className="grid gap-6 xl:grid-cols-2">
-          {/* Bloc 1 — Infos & Calendrier */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarDays className="size-4 text-muted-foreground" />
-                Infos & Calendrier
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <FieldItem label="Téléphone" defaultValue={dossier.telephone} />
-              <FieldItem label="Email" defaultValue={dossier.email} />
-              <FieldItem label="Agent / Broker" defaultValue={dossier.agent} />
-              <FieldItem
-                label="Date de prise de bail"
-                type="date"
-                defaultValue={dossier.dateBail}
-              />
-              <FieldItem
-                label="Date d'ouverture prévue"
-                type="date"
-                defaultValue={dossier.dateOuverture}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Bloc 2 — Finance & Contrat */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Landmark className="size-4 text-muted-foreground" />
-                Finance & Contrat
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <FieldItem
-                label="Apport (€)"
-                defaultValue={String(dossier.apport)}
-              />
-              <FieldItem
-                label="Honoraires / Droit d'entrée"
-                defaultValue={String(dossier.honoraires)}
-              />
-              <FieldItem label="Nom de la banque" defaultValue={dossier.banque} />
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="fin">Statut Financement</Label>
-                <Select defaultValue={dossier.financement}>
-                  <SelectTrigger id="fin" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="Oui">Oui</SelectItem>
-                      <SelectItem value="En cours">En cours</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Bloc 3 — Territoire */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <MapPinned className="size-4 text-muted-foreground" />
-                Territoire
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <FieldItem
-                label="Zone d'exclusivité"
-                defaultValue={dossier.zoneExclusivite}
-              />
-              <FieldItem
-                label="Zone de 1er refus"
-                defaultValue={dossier.zonePremierRefus}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Bloc 4 — Coffre-fort documentaire */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="size-4 text-muted-foreground" />
-                Coffre-fort Documentaire
-              </CardTitle>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {dossier.documents.filter((d) => d.statut === "valide").length}/
-                {dossier.documents.length}
-              </span>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              {dossier.documents.map((doc) => {
-                const ok = doc.statut === "valide"
-                return (
-                  <div
-                    key={doc.nom}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg border px-3 py-2",
-                      ok
-                        ? "border-score-high/25 bg-score-high/5"
-                        : "border-dashed border-border",
-                    )}
-                  >
-                    {ok ? (
-                      <CheckCircle2 className="size-4 shrink-0 text-score-high" />
-                    ) : (
-                      <Circle className="size-4 shrink-0 text-muted-foreground/50" />
-                    )}
-                    <span
-                      className={cn(
-                        "flex-1 text-sm",
-                        ok
-                          ? "font-medium text-foreground"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {doc.nom}
-                    </span>
-                    {ok ? (
-                      <Badge variant="secondary" className="bg-score-high/15 text-score-high">
-                        Validé
-                      </Badge>
-                    ) : (
-                      <Button size="sm" variant="ghost" className="h-7">
-                        <Upload data-icon="inline-start" />
-                        Déposer
-                      </Button>
-                    )}
-                  </div>
-                )
-              })}
-            </CardContent>
-          </Card>
+      ) : (
+        <div className="lg:col-span-9 flex items-center justify-center p-12 border border-dashed border-border rounded-xl">
+          <p className="text-sm text-muted-foreground">
+            Sélectionne ou crée un dossier dans la colonne de gauche pour afficher les détails.
+          </p>
         </div>
-      </div>
-    </div>
-  )
-}
-
-function FieldItem({
-  label,
-  defaultValue,
-  type = "text",
-}: {
-  label: string
-  defaultValue: string
-  type?: string
-}) {
-  const id = label.replace(/[^a-z0-9]/gi, "-").toLowerCase()
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Input id={id} type={type} defaultValue={defaultValue} className="h-9" />
+      )}
     </div>
   )
 }
