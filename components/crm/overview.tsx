@@ -1,144 +1,237 @@
 "use client"
 
-import { useState } from "react"
-import { ArrowUpRight, CalendarClock, CheckCircle2 } from "lucide-react"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import { cn } from "@/lib/utils"
+import { useEffect, useState } from "react"
 import {
-  dossiersValides,
-  formatDateFr,
-  kpis,
-  missions,
-  prioriteMeta,
-} from "@/lib/crm-data"
+  AlertCircle,
+  Building2,
+  CalendarClock,
+  CheckSquare,
+  Clock,
+  FolderKanban,
+  ArrowRight,
+  Users,
+} from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { supabase } from "@/lib/supabase"
+
+type KpiData = {
+  prospectsCount: number
+  dossiersCount: number
+  locauxCount: number
+  missionsCount: number
+}
+
+type Mission = {
+  id: number
+  title: string
+  priorite: string
+  lie_a: string
+  echeance: string
+  terminee: boolean
+}
 
 export function Overview() {
-  const topMissions = missions.slice(0, 5)
-  const [done, setDone] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(topMissions.map((m) => [m.id, m.fait])),
-  )
+  const [kpis, setKpis] = useState<KpiData>({ prospectsCount: 0, dossiersCount: 0, locauxCount: 0, missionsCount: 0 })
+  const [urgentMissions, setUrgentMissions] = useState<Mission[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchDashboardData = async () => {
+    setLoading(true)
+
+    // Lancement des requêtes en parallèle pour plus de rapidité
+    const [
+      { count: prospectsCount },
+      { count: dossiersCount },
+      { count: locauxCount },
+      { data: missionsData }
+    ] = await Promise.all([
+      supabase.from("prospects").select("*", { count: "exact", head: true }),
+      supabase.from("dossiers").select("*", { count: "exact", head: true }).eq('statut_dossier', 'En cours'),
+      supabase.from("locaux_disponibles").select("*", { count: "exact", head: true }).eq('statut', 'Disponible'),
+      supabase.from("missions").select("*").eq('terminee', false)
+    ])
+
+    setKpis({
+      prospectsCount: prospectsCount || 0,
+      dossiersCount: dossiersCount || 0,
+      locauxCount: locauxCount || 0,
+      missionsCount: missionsData ? missionsData.length : 0
+    })
+
+    // Filtrer les missions à moins de 3 jours ou en retard
+    if (missionsData) {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0) // On remet à minuit pour comparer juste les jours
+      
+      const inThreeDays = new Date(today)
+      inThreeDays.setDate(today.getDate() + 3)
+
+      const urgent = missionsData.filter((m: Mission) => {
+        if (!m.echeance) return false
+        const dueDate = new Date(m.echeance)
+        dueDate.setHours(0, 0, 0, 0)
+        return dueDate <= inThreeDays
+      }).sort((a, b) => new Date(a.echeance).getTime() - new Date(b.echeance).getTime())
+
+      setUrgentMissions(urgent)
+    }
+
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchDashboardData()
+  }, [])
+
+  // Calcul du statut de la date (En retard, Aujourd'hui, ou J-X)
+  const getDaysRemainingInfo = (dateStr: string) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dueDate = new Date(dateStr)
+    dueDate.setHours(0, 0, 0, 0)
+    
+    const diffTime = dueDate.getTime() - today.getTime()
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+    if (diffDays < 0) return { label: "En retard", color: "text-red-400 bg-red-500/10 border-red-500/20" }
+    if (diffDays === 0) return { label: "Aujourd'hui", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" }
+    if (diffDays === 1) return { label: "Demain", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" }
+    return { label: `J-${diffDays}`, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" }
+  }
+
+  if (loading) {
+    return <div className="p-6 text-sm text-muted-foreground">Chargement du tableau de bord…</div>
+  }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {kpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <CardContent className="flex flex-col gap-1.5 py-5">
-              <span className="text-sm font-medium text-muted-foreground">
-                {kpi.label}
-              </span>
-              <div className="flex items-end justify-between gap-2">
-                <span className="font-mono text-3xl font-semibold tracking-tight text-foreground tabular-nums">
-                  {kpi.value}
-                </span>
-                <Badge
-                  variant="secondary"
-                  className={cn(
-                    "gap-1",
-                    kpi.trend === "up" && "text-score-high",
-                  )}
-                >
-                  {kpi.trend === "up" && <ArrowUpRight className="size-3" />}
-                  {kpi.delta}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+      
+      {/* En-tête */}
+      <div>
+        <h2 className="text-2xl font-bold text-foreground">Vue d'ensemble</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Bienvenue sur ton espace. Voici le résumé de ton activité réseau.
+        </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Top 5 Missions Prioritaires</CardTitle>
-            <Badge variant="outline">
-              {topMissions.filter((m) => !done[m.id]).length} à traiter
-            </Badge>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1">
-            {topMissions.map((m) => {
-              const isDone = done[m.id]
-              return (
-                <label
-                  key={m.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-muted/60"
-                >
-                  <Checkbox
-                    checked={isDone}
-                    onCheckedChange={(checked) =>
-                      setDone((prev) => ({ ...prev, [m.id]: checked === true }))
-                    }
-                    aria-label={`Marquer « ${m.description} » comme fait`}
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span
-                      className={cn(
-                        "truncate text-sm font-medium text-foreground",
-                        isDone && "text-muted-foreground line-through",
-                      )}
-                    >
-                      {m.description}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {m.liee}
-                    </span>
-                  </div>
-                  <Badge
-                    variant="secondary"
-                    className={cn("shrink-0", prioriteMeta[m.priorite].badgeClass)}
-                  >
-                    {m.priorite}
-                  </Badge>
-                  <span
-                    className={cn(
-                      "flex w-24 shrink-0 items-center justify-end gap-1 text-xs tabular-nums",
-                      m.urgent && !isDone
-                        ? "font-semibold text-score-low"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    <CalendarClock className="size-3.5" />
-                    {formatDateFr(m.echeance)}
-                  </span>
-                </label>
-              )
-            })}
-          </CardContent>
-        </Card>
+      {/* Ligne des KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
+          <div className="flex items-center gap-3 text-muted-foreground mb-2">
+            <Users className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold">Prospects Actifs</h3>
+          </div>
+          <div className="text-3xl font-bold text-foreground">{kpis.prospectsCount}</div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Derniers Dossiers Validés</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1">
-            {dossiersValides.map((d) => (
-              <div
-                key={d.candidat}
-                className="flex items-center gap-3 rounded-lg px-2 py-2.5"
-              >
-                <Avatar className="size-9">
-                  <AvatarFallback className="bg-score-high/15 text-score-high">
-                    <CheckCircle2 className="size-4" />
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {d.candidat}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {d.ville} · {d.metier}
-                  </span>
-                </div>
-                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                  {d.date}
-                </span>
+        <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
+          <div className="flex items-center gap-3 text-muted-foreground mb-2">
+            <FolderKanban className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold">Projets en cours</h3>
+          </div>
+          <div className="text-3xl font-bold text-foreground">{kpis.dossiersCount}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
+          <div className="flex items-center gap-3 text-muted-foreground mb-2">
+            <Building2 className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold">Locaux Disponibles</h3>
+          </div>
+          <div className="text-3xl font-bold text-foreground">{kpis.locauxCount}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
+          <div className="flex items-center gap-3 text-muted-foreground mb-2">
+            <CheckSquare className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold">Missions ouvertes</h3>
+          </div>
+          <div className="text-3xl font-bold text-foreground">{kpis.missionsCount}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* BLOC MISSIONS URGENTES (< 3 jours) */}
+        <div className="rounded-xl border border-red-500/20 bg-red-950/10 p-5 shadow-lg flex flex-col">
+          <div className="flex items-center gap-2 border-b border-red-500/10 pb-3 mb-4">
+            <AlertCircle className="h-5 w-5 text-red-400" />
+            <h3 className="font-bold text-red-100 text-base">Missions urgentes (J-3)</h3>
+            <Badge className="ml-auto bg-red-500 text-white hover:bg-red-600">
+              {urgentMissions.length}
+            </Badge>
+          </div>
+
+          <div className="flex flex-col gap-3 flex-1 overflow-y-auto max-h-[400px] pr-2">
+            {urgentMissions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center text-muted-foreground py-8">
+                <CheckSquare className="h-8 w-8 mb-2 opacity-20" />
+                <p className="text-sm">Aucune mission urgente pour le moment.</p>
               </div>
-            ))}
-          </CardContent>
-        </Card>
+            ) : (
+              urgentMissions.map((mission) => {
+                const info = getDaysRemainingInfo(mission.echeance)
+                return (
+                  <div key={mission.id} className="rounded-lg border border-border bg-background p-3 flex flex-col gap-2 transition hover:border-red-500/30">
+                    <div className="flex justify-between items-start gap-2">
+                      <h4 className="font-semibold text-sm text-foreground leading-tight">
+                        {mission.title}
+                      </h4>
+                      <Badge variant="outline" className={`shrink-0 text-[10px] ${info.color}`}>
+                        {info.label}
+                      </Badge>
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+                       <span className="flex items-center gap-1">
+                         <CalendarClock className="h-3.5 w-3.5" />
+                         {new Date(mission.echeance).toLocaleDateString("fr-FR")}
+                       </span>
+                       <span className="truncate ml-4 max-w-[150px]" title={mission.lie_a}>
+                         {mission.lie_a}
+                       </span>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+
+        {/* BLOC RACCOURCIS & ACTIVITÉS (Peut être étendu plus tard) */}
+        <div className="rounded-xl border border-border bg-card p-5 flex flex-col">
+          <div className="flex items-center gap-2 border-b border-border pb-3 mb-4">
+            <Clock className="h-5 w-5 text-primary" />
+            <h3 className="font-bold text-foreground text-base">Raccourcis & Actions</h3>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            <Button variant="outline" className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50">
+              <Users className="mr-3 h-4 w-4 text-primary" />
+              Ajouter un nouveau candidat
+              <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
+            </Button>
+            
+            <Button variant="outline" className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50">
+              <Building2 className="mr-3 h-4 w-4 text-primary" />
+              Référencer un nouveau local
+              <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
+            </Button>
+            
+            <Button variant="outline" className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50">
+              <CheckSquare className="mr-3 h-4 w-4 text-primary" />
+              Créer une nouvelle mission
+              <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
+            </Button>
+          </div>
+
+          <div className="mt-8 rounded-lg bg-primary/10 border border-primary/20 p-4 text-center">
+            <p className="text-sm font-medium text-primary mb-1">Simulateur de rentabilité</p>
+            <p className="text-xs text-muted-foreground mb-3">Estimez la viabilité financière d'un projet pour un candidat franchisé.</p>
+            <Button size="sm" className="w-full">Ouvrir le simulateur ROI</Button>
+          </div>
+        </div>
+
       </div>
     </div>
   )
