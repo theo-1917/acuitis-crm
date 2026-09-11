@@ -1,10 +1,12 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import {
   CheckSquare,
   FolderKanban,
   LayoutDashboard,
   Map,
+  MapPin,
   Table2,
   TrendingUp,
 } from "lucide-react"
@@ -18,6 +20,8 @@ import { ProspectsPipeline } from "./prospects-pipeline"
 import { RoiSimulator } from "./roi-simulator"
 
 export function Dashboard() {
+  const router = useRouter()
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <Header />
@@ -35,6 +39,13 @@ export function Dashboard() {
               <TabsTrigger value="pipeline">
                 <Table2 data-icon="inline-start" />
                 Pipeline Prospects
+              </TabsTrigger>
+              <TabsTrigger
+                value="emplacements"
+                onClick={() => router.push("/emplacements")}
+              >
+                <MapPin data-icon="inline-start" />
+                Recherche d'emplacements
               </TabsTrigger>
               <TabsTrigger value="dossiers">
                 <FolderKanban data-icon="inline-start" />

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDownWideNarrow, MoreHorizontal, Plus } from "lucide-react"
+import { ArrowDownWideNarrow, MapPin, MoreHorizontal, Plus } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { formatEuro } from "@/lib/crm-data"
 import { ScoreRing } from "./score-indicator"
 import { supabase } from "@/lib/supabase"
+import { AddEmplacementModal } from "./add-emplacement-modal"
 
 const statutStyles: Record<string, string> = {
   "Premier contact": "bg-muted text-muted-foreground",
@@ -46,6 +47,10 @@ export function ProspectsPipeline() {
   
   const [showForm, setShowForm] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Gestion de la modale d'emplacement
+  const [selectedProspect, setSelectedProspect] = useState<{ id: number; prenom: string; nom: string } | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
   
   const initialFormState = {
     name: "", ville: "", metier: "Opticien", apport: "", statut: "Nouveau", score: "50",
@@ -61,6 +66,19 @@ export function ProspectsPipeline() {
   useEffect(() => {
     loadProspects()
   }, [])
+
+  function handleOpenEmplacementModal(prospectRow: any) {
+    const nameParts = (prospectRow.nom || "").trim().split(" ")
+    const prenom = nameParts[0] || ""
+    const nom = nameParts.slice(1).join(" ") || prospectRow.nom || ""
+
+    setSelectedProspect({
+      id: prospectRow.id,
+      prenom: prenom,
+      nom: nom,
+    })
+    setIsModalOpen(true)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -251,6 +269,10 @@ export function ProspectsPipeline() {
                     <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>} />
                     <DropdownMenuContent align="end">
                       <DropdownMenuGroup>
+                        <DropdownMenuItem onClick={() => handleOpenEmplacementModal(p)}>
+                          <MapPin className="mr-2 h-4 w-4" />
+                          Lancer recherche local
+                        </DropdownMenuItem>
                         <DropdownMenuItem>Voir la fiche complète</DropdownMenuItem>
                         <DropdownMenuItem variant="destructive" onClick={() => handleDelete(p.id)}>
                           Archiver
@@ -271,6 +293,12 @@ export function ProspectsPipeline() {
           </TableBody>
         </Table>
       </div>
+
+      <AddEmplacementModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        prospect={selectedProspect}
+      />
     </div>
   )
 }
