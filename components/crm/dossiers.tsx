@@ -8,9 +8,11 @@ import {
   FolderKanban,
   Landmark,
   Map,
+  MessageSquare,
   Plus,
+  Sparkles,
+  Trash2,
   Upload,
-  User,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,12 +39,15 @@ type Dossier = {
   statut_financement: string
   zone_exclusivite: string
   zone_premier_refus: string
+  commentaire: string
+  statut_dossier: string
   dip_signe_url: string
   roi_url: string
   kbis_url: string
   rib_url: string
   etude_zone_url: string
   devis_travaux_url: string
+  bail_signe_url: string
   prospects?: Prospect
 }
 
@@ -53,7 +58,6 @@ export function Dossiers() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  // Données du dossier sélectionné
   const [currentDossier, setCurrentDossier] = useState<Partial<Dossier>>({})
 
   const loadData = async () => {
@@ -62,9 +66,7 @@ export function Dossiers() {
       .from("dossiers")
       .select("*, prospects(*)")
 
-    const { data: prospectsData } = await supabase
-      .from("prospects")
-      .select("*")
+    const { data: prospectsData } = await supabase.from("prospects").select("*")
 
     if (dossiersData && dossiersData.length > 0) {
       setDossiers(dossiersData)
@@ -75,6 +77,10 @@ export function Dossiers() {
         const found = dossiersData.find((d) => d.id === selectedDossierId)
         if (found) setCurrentDossier(found)
       }
+    } else {
+      setDossiers([])
+      setSelectedDossierId(null)
+      setCurrentDossier({})
     }
 
     if (prospectsData && dossiersData) {
@@ -96,7 +102,7 @@ export function Dossiers() {
   const handleCreateDossier = async (prospectId: number) => {
     const { data, error } = await supabase
       .from("dossiers")
-      .insert([{ prospect_id: prospectId, statut_financement: "En cours" }])
+      .insert([{ prospect_id: prospectId, statut_financement: "En cours", statut_dossier: "En cours" }])
       .select("*, prospects(*)")
 
     if (!error && data && data[0]) {
@@ -123,15 +129,48 @@ export function Dossiers() {
         statut_financement: currentDossier.statut_financement || "En cours",
         zone_exclusivite: currentDossier.zone_exclusivite || "",
         zone_premier_refus: currentDossier.zone_premier_refus || "",
+        commentaire: currentDossier.commentaire || "",
       })
       .eq("id", selectedDossierId)
 
     setSaving(false)
     if (!error) {
       await loadData()
-      alert("Modifications enregistrées avec succès !")
+      alert("Modifications enregistrées !")
     } else {
-      alert("Erreur lors de la sauvegarde : " + error.message)
+      alert("Erreur de sauvegarde : " + error.message)
+    }
+  }
+
+  const handleToggleValidate = async () => {
+    if (!selectedDossierId) return
+    const newStatus = currentDossier.statut_dossier === "Validé" ? "En cours" : "Validé"
+
+    const { error } = await supabase
+      .from("dossiers")
+      .update({ statut_dossier: newStatus })
+      .eq("id", selectedDossierId)
+
+    if (!error) {
+      setCurrentDossier((prev) => ({ ...prev, statut_dossier: newStatus }))
+      await loadData()
+    } else {
+      alert("Erreur de validation : " + error.message)
+    }
+  }
+
+  const handleDeleteDossier = async () => {
+    if (!selectedDossierId) return
+    if (!confirm("Voulez-vous vraiment supprimer ce dossier ?")) return
+
+    const { error } = await supabase.from("dossiers").delete().eq("id", selectedDossierId)
+
+    if (!error) {
+      setSelectedDossierId(null)
+      setCurrentDossier({})
+      await loadData()
+    } else {
+      alert("Erreur de suppression : " + error.message)
     }
   }
 
@@ -165,20 +204,22 @@ export function Dossiers() {
       setCurrentDossier((prev) => ({ ...prev, [fileKey]: publicUrl }))
       await loadData()
     } else {
-      alert("Erreur lors de la mise à jour du lien du document.")
+      alert("Erreur lors de la mise à jour du lien document.")
     }
   }
 
-  // Calcul du nombre de documents validés (x/6)
-  const docKeys: (keyof Dossier)[] = [
-    "dip_signe_url",
-    "roi_url",
-    "kbis_url",
-    "rib_url",
-    "etude_zone_url",
-    "devis_travaux_url",
+  // 7 documents officiels dans le Coffre-fort
+  const docKeys: { key: keyof Dossier; label: string }[] = [
+    { key: "dip_signe_url", label: "DIP signé" },
+    { key: "roi_url", label: "ROI" },
+    { key: "kbis_url", label: "Kbis" },
+    { key: "rib_url", label: "RIB" },
+    { key: "etude_zone_url", label: "Étude de zone" },
+    { key: "devis_travaux_url", label: "Devis travaux" },
+    { key: "bail_signe_url", label: "Bail signé" },
   ]
-  const docsUploadedCount = docKeys.filter((k) => !!currentDossier[k]).length
+  const docsUploadedCount = docKeys.filter(({ key }) => !!currentDossier[key]).length
+  const isFullyValidated = currentDossier.statut_dossier === "Validé"
 
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">Chargement des dossiers…</div>
@@ -186,7 +227,7 @@ export function Dossiers() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-      {/* Sidebar gauche : Liste des candidats */}
+      {/* Colonne Gauche : Liste des Projets */}
       <div className="lg:col-span-3 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between border-b border-border pb-3">
           <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
@@ -198,6 +239,7 @@ export function Dossiers() {
         <div className="flex flex-col gap-2 overflow-y-auto max-h-[600px]">
           {dossiers.map((d) => {
             const isSelected = d.id === selectedDossierId
+            const isValidated = d.statut_dossier === "Validé"
             return (
               <button
                 key={d.id}
@@ -209,15 +251,16 @@ export function Dossiers() {
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted font-bold text-xs text-foreground">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted font-bold text-xs text-foreground shrink-0">
                     {d.prospects?.name?.substring(0, 2).toUpperCase() || "??"}
                   </div>
                   <div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {d.prospects?.name || "Candidat sans nom"}
+                    <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                      <span>{d.prospects?.name || "Candidat"}</span>
+                      {isValidated && <Sparkles className="h-3.5 w-3.5 text-emerald-400" />}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {d.prospects?.ville || "Ville non précisée"}
+                      {d.prospects?.ville || "Sans ville"}
                     </div>
                   </div>
                 </div>
@@ -232,7 +275,6 @@ export function Dossiers() {
           )}
         </div>
 
-        {/* Option pour rattacher un candidat sans dossier */}
         {prospectsWithoutDossier.length > 0 && (
           <div className="mt-4 pt-3 border-t border-border">
             <label className="block text-xs font-medium text-muted-foreground mb-2">
@@ -258,17 +300,70 @@ export function Dossiers() {
         )}
       </div>
 
-      {/* Zone principale : Les 4 blocs de la maquette */}
+      {/* Zone Principale */}
       {selectedDossierId && currentDossier ? (
         <div className="lg:col-span-9 flex flex-col gap-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-foreground">
-              Dossier de {currentDossier.prospects?.name}
-            </h2>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Enregistrement…" : "Sauvegarder les modifications"}
-            </Button>
+          {/* Entête & Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-foreground">
+                Dossier de {currentDossier.prospects?.name}
+              </h2>
+              {isFullyValidated ? (
+                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Validé & Finalisé
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs">En cours</Badge>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDeleteDossier}
+                className="text-xs"
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Supprimer
+              </Button>
+
+              <Button
+                variant={isFullyValidated ? "outline" : "default"}
+                size="sm"
+                onClick={handleToggleValidate}
+                className={
+                  isFullyValidated
+                    ? "border-emerald-500/50 text-emerald-400 hover:bg-emerald-950/30"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                }
+              >
+                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                {isFullyValidated ? "Rouvrir le dossier" : "Valider le dossier"}
+              </Button>
+
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? "Enregistrement…" : "Sauvegarder"}
+              </Button>
+            </div>
           </div>
+
+          {/* BANDEAU DE CÉLÉBRATION EN CAS DE VALIDATION */}
+          {isFullyValidated && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-emerald-200 flex items-center justify-between shadow-lg shadow-emerald-950/10 animate-in fade-in duration-300">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-emerald-500/20 border border-emerald-500/40">
+                  <Sparkles className="h-5 w-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-sm text-emerald-300">Dossier complètement validé !</h4>
+                  <p className="text-xs text-emerald-400/80">
+                    Tous les prérequis financiers, juridiques et territoriaux sont validés. Prêt pour l'ouverture.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* BLOC 1 : Infos & Calendrier */}
@@ -410,11 +505,11 @@ export function Dossiers() {
               </div>
             </div>
 
-            {/* BLOC 3 : Territoire */}
+            {/* BLOC 3 : Territoire & Commentaires */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <div className="flex items-center gap-2 border-b border-border pb-3">
                 <Map className="h-4 w-4 text-primary" />
-                <h3 className="font-semibold text-foreground text-sm">Territoire</h3>
+                <h3 className="font-semibold text-foreground text-sm">Territoire & Notes</h3>
               </div>
 
               <div>
@@ -444,30 +539,38 @@ export function Dossiers() {
                   className="text-xs"
                 />
               </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                  <MessageSquare className="h-3 w-3" /> Commentaires & Remarques
+                </label>
+                <textarea
+                  rows={3}
+                  value={currentDossier.commentaire || ""}
+                  onChange={(e) =>
+                    setCurrentDossier({ ...currentDossier, commentaire: e.target.value })
+                  }
+                  placeholder="Ajouter des précisions sur le projet, travaux, échanges..."
+                  className="w-full rounded-md border border-input bg-background p-2.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                />
+              </div>
             </div>
 
-            {/* BLOC 4 : Coffre-fort Documentaire */}
+            {/* BLOC 4 : Coffre-fort Documentaire (7 documents) */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" />
                   <h3 className="font-semibold text-foreground text-sm">Coffre-fort Documentaire</h3>
                 </div>
-                <Badge variant={docsUploadedCount === 6 ? "default" : "secondary"}>
-                  {docsUploadedCount}/6
+                <Badge variant={docsUploadedCount === 7 ? "default" : "secondary"}>
+                  {docsUploadedCount}/7
                 </Badge>
               </div>
 
               <div className="space-y-2">
-                {[
-                  { key: "dip_signe_url", label: "DIP signé" },
-                  { key: "roi_url", label: "ROI" },
-                  { key: "kbis_url", label: "Kbis" },
-                  { key: "rib_url", label: "RIB" },
-                  { key: "etude_zone_url", label: "Étude de zone" },
-                  { key: "devis_travaux_url", label: "Devis travaux" },
-                ].map(({ key, label }) => {
-                  const url = currentDossier[key as keyof Dossier]
+                {docKeys.map(({ key, label }) => {
+                  const url = currentDossier[key]
                   return (
                     <div
                       key={key}
@@ -507,7 +610,7 @@ export function Dossiers() {
                               className="hidden"
                               onChange={(e) => {
                                 const file = e.target.files?.[0]
-                                if (file) handleFileUpload(key as keyof Dossier, file)
+                                if (file) handleFileUpload(key, file)
                               }}
                             />
                           </label>
