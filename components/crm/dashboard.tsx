@@ -1,6 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
+import { useState } from "react"
 import {
   Building2,
   CheckSquare,
@@ -21,13 +22,16 @@ import { RoiSimulator } from "./roi-simulator"
 
 export function Dashboard() {
   const router = useRouter()
+  // React contrôle maintenant l'onglet affiché (par défaut : overview)
+  const [activeTab, setActiveTab] = useState("overview")
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <Header />
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <Tabs
-          defaultValue="overview"
+          value={activeTab}
+          onValueChange={setActiveTab}
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <div className="shrink-0 overflow-x-auto border-b border-border bg-card px-6">
@@ -67,9 +71,11 @@ export function Dashboard() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            {/* On passe la fonction de changement d'onglet à notre Overview */}
             <TabsContent value="overview" className="mt-0">
-              <Overview />
+              <Overview onNavigate={setActiveTab} />
             </TabsContent>
+            
             <TabsContent value="pipeline" className="mt-0">
               <ProspectsPipeline />
             </TabsContent>

@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import {
   AlertCircle,
   Building2,
@@ -35,8 +34,11 @@ type Mission = {
   terminee: boolean
 }
 
-export function Overview() {
-  const router = useRouter()
+type OverviewProps = {
+  onNavigate?: (tab: string) => void
+}
+
+export function Overview({ onNavigate }: OverviewProps) {
   const [kpis, setKpis] = useState<KpiData>({ 
     prospectsCount: 0, 
     emplacementsCount: 0, 
@@ -50,7 +52,6 @@ export function Overview() {
   const fetchDashboardData = async () => {
     setLoading(true)
 
-    // Lancement de toutes les requêtes en parallèle
     const [
       { count: prospectsCount },
       { count: emplacementsCount },
@@ -58,7 +59,7 @@ export function Overview() {
       { count: locauxCount },
       { data: missionsData }
     ] = await Promise.all([
-      supabase.from("prospects").select("*", { count: "exact", head: true }), // Bientôt filtré par actif=true
+      supabase.from("prospects").select("*", { count: "exact", head: true }),
       supabase.from("emplacements").select("*", { count: "exact", head: true }),
       supabase.from("dossiers").select("*", { count: "exact", head: true }).eq('statut_dossier', 'En cours'),
       supabase.from("locaux_disponibles").select("*", { count: "exact", head: true }).eq('statut', 'Disponible'),
@@ -112,11 +113,10 @@ export function Overview() {
     return { label: `J-${diffDays}`, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" }
   }
 
-  // Fonction pour simuler un clic sur les onglets de navigation
+  // La nouvelle fonction qui utilise la propriété React
   const goToTab = (tabValue: string) => {
-    const tabTrigger = document.querySelector(`button[value="${tabValue}"]`) as HTMLButtonElement
-    if (tabTrigger) {
-      tabTrigger.click()
+    if (onNavigate) {
+      onNavigate(tabValue)
     }
   }
 
@@ -127,7 +127,6 @@ export function Overview() {
   return (
     <div className="flex flex-col gap-6">
       
-      {/* En-tête */}
       <div>
         <h2 className="text-2xl font-bold text-foreground">Vue d'ensemble</h2>
         <p className="text-sm text-muted-foreground mt-1">
@@ -135,7 +134,6 @@ export function Overview() {
         </p>
       </div>
 
-      {/* Ligne des KPIs (Passée à 5 colonnes) */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
           <div className="flex items-center gap-3 text-muted-foreground mb-2">
@@ -180,7 +178,7 @@ export function Overview() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* BLOC MISSIONS URGENTES (< 3 jours) */}
+        {/* BLOC MISSIONS URGENTES */}
         <div className="rounded-xl border border-red-500/20 bg-red-950/10 p-5 shadow-lg flex flex-col">
           <div className="flex items-center gap-2 border-b border-red-500/10 pb-3 mb-4">
             <AlertCircle className="h-5 w-5 text-red-400" />
