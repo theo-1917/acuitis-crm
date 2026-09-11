@@ -21,7 +21,6 @@ type Prospect = {
   created_at: string
 }
 
-// Colonnes ajustées selon tes besoins
 const COLUMNS = ["Nouveau", "Contacté", "RDV", "Non qualifié", "Perdu"]
 
 const PROVENANCES = [
@@ -71,6 +70,7 @@ export function ProspectsPipeline() {
     }
   }
 
+  // Correction de la création d'emplacement (type_zone à null)
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
@@ -79,7 +79,7 @@ export function ProspectsPipeline() {
       prospect_id: p.id,
       villes_recherchees: villes,
       statut_recherche: "en_recherche",
-      type_zone: "Tous",
+      type_zone: null,
       surface_souhaitee_m2: 0
     }])
 
@@ -138,13 +138,11 @@ export function ProspectsPipeline() {
     document.body.removeChild(link)
   }
 
-  // EXPORT RAPPORT KPI ENRICHI (Croisement Mensuel & Annuel)
   const handleExportKPI = () => {
     const total = prospects.length
     const actifs = prospects.filter(p => p.actif).length
     const inactifs = total - actifs
 
-    // Regroupement des prospects par Année et Mois
     const prospectsByMonthYear: Record<string, Prospect[]> = {}
     prospects.forEach(p => {
       const d = new Date(p.created_at)
@@ -156,7 +154,6 @@ export function ProspectsPipeline() {
 
     const sortedMonthKeys = Object.keys(prospectsByMonthYear).sort()
 
-    // 1. Ventilation des Statuts par Mois & Année
     const statusByMonthHeader = `Période (Mois/Année);${COLUMNS.join(";")};Total`
     const statusByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
@@ -166,7 +163,6 @@ export function ProspectsPipeline() {
       return `"${monthLabel}";${counts.join(';')};${list.length}`
     })
 
-    // 2. Ventilation des Provenances par Mois & Année
     const provenanceByMonthHeader = `Période (Mois/Année);${PROVENANCES.join(";")};Total`
     const provenanceByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
@@ -176,7 +172,6 @@ export function ProspectsPipeline() {
       return `"${monthLabel}";${counts.join(';')};${list.length}`
     })
 
-    // Structuration finale du fichier
     const csvLines = [
       "RAPPORT ANALYTIQUE ET KPI - DÉVELOPPEMENT RÉSEAU ACUITIS",
       `Date de l'export;${new Date().toLocaleDateString("fr-FR")}`,
