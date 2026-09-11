@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import dynamic from "next/dynamic"
-import { Building2, Check, FileText, Image as ImageIcon, MapPin, Pencil, Plus, Star, Trash2, X } from "lucide-react"
+import { Building2, Check, FileText, Image as ImageIcon, MapPin, Pencil, Plus, Star, Trash2, X, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -116,7 +116,6 @@ export function NetworkMap() {
     }
 
     // 4. Nettoyage et Sauvegarde Base de données
-    // On extrait id et created_at pour ne PAS les envoyer dans la mise à jour
     const { id, created_at, ...cleanFormData } = formData as any
     const payload = { ...cleanFormData, fiche_pdf_url: pdfUrl, photo_url: photoUrl, lat, lng }
 
@@ -162,7 +161,7 @@ export function NetworkMap() {
         <Star
           key={star}
           onClick={() => interactive && setFormData({ ...formData, note: star })}
-          className={`h-4 w-4 ${interactive ? "cursor-pointer hover:scale-110" : ""} ${star <= note ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
+          className={`h-3 w-3 sm:h-4 sm:w-4 ${interactive ? "cursor-pointer hover:scale-110" : ""} ${star <= note ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
         />
       ))}
     </div>
@@ -221,12 +220,17 @@ export function NetworkMap() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs border-t border-border pt-3">
-                  <div>
+                <div className="grid grid-cols-3 gap-2 text-xs border-t border-border pt-3">
+                  <div className="col-span-1">
                     <span className="text-muted-foreground block mb-0.5">Potentiel</span>
                     {renderStars(local.note)}
                   </div>
-                  <div className="text-right">
+                  <div className="col-span-1">
+                    <span className="text-muted-foreground block mb-0.5 flex items-center gap-1"><User className="h-3 w-3" /> Agent</span>
+                    <div className="font-medium truncate">{local.agent_telephone || "-"}</div>
+                    <div className="text-muted-foreground/70 truncate" title={local.agent_email}>{local.agent_email || "-"}</div>
+                  </div>
+                  <div className="col-span-1 flex items-start justify-end">
                     <button 
                       onClick={() => toggleVisite(local.id, local.visite_effectuee)}
                       className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border transition ${local.visite_effectuee ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground border-border hover:bg-muted-foreground/20"}`}
@@ -238,7 +242,7 @@ export function NetworkMap() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-2 pt-2">
+                <div className="flex items-center gap-2 pt-2 border-t border-border mt-1">
                   <Button variant="outline" size="sm" className="flex-1 text-xs h-8" onClick={() => handleEdit(local)}>
                     <Pencil className="h-3 w-3 mr-1" /> Modifier
                   </Button>
@@ -259,7 +263,7 @@ export function NetworkMap() {
         </div>
 
         {/* COLONNE DROITE : CARTE */}
-        <div className="lg:col-span-7 h-full min-h-[400px] rounded-xl overflow-hidden border border-border shadow-lg">
+        <div className="lg:col-span-7 h-full min-h-[400px] rounded-xl overflow-hidden border border-border shadow-lg z-0 relative">
            <MapView locaux={locaux} onSelect={() => {}} />
         </div>
       </div>
@@ -301,6 +305,17 @@ export function NetworkMap() {
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Cession / DAB (€)</label>
                   <Input type="number" value={formData.prix_cession || ""} onChange={e => setFormData({...formData, prix_cession: Number(e.target.value)})} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 border-t border-border pt-4">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Téléphone Agent/Prop.</label>
+                  <Input value={formData.agent_telephone || ""} placeholder="06 12 34 56 78" onChange={e => setFormData({...formData, agent_telephone: e.target.value})} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Email Agent/Prop.</label>
+                  <Input type="email" value={formData.agent_email || ""} placeholder="agent@immo.fr" onChange={e => setFormData({...formData, agent_email: e.target.value})} />
                 </div>
               </div>
 
