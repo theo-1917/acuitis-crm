@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   AlertCircle,
   Building2,
@@ -39,6 +40,7 @@ type OverviewProps = {
 }
 
 export function Overview({ onNavigate }: OverviewProps) {
+  const router = useRouter()
   const [kpis, setKpis] = useState<KpiData>({ 
     prospectsCount: 0, 
     emplacementsCount: 0, 
@@ -59,7 +61,8 @@ export function Overview({ onNavigate }: OverviewProps) {
       { count: locauxCount },
       { data: missionsData }
     ] = await Promise.all([
-      supabase.from("prospects").select("*", { count: "exact", head: true }),
+      // ICI : on ne compte QUE les prospects où actif est true
+      supabase.from("prospects").select("*", { count: "exact", head: true }).eq('actif', true),
       supabase.from("emplacements").select("*", { count: "exact", head: true }),
       supabase.from("dossiers").select("*", { count: "exact", head: true }).eq('statut_dossier', 'En cours'),
       supabase.from("locaux_disponibles").select("*", { count: "exact", head: true }).eq('statut', 'Disponible'),
@@ -113,7 +116,6 @@ export function Overview({ onNavigate }: OverviewProps) {
     return { label: `J-${diffDays}`, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" }
   }
 
-  // La nouvelle fonction qui utilise la propriété React
   const goToTab = (tabValue: string) => {
     if (onNavigate) {
       onNavigate(tabValue)
