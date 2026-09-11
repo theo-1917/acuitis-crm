@@ -115,13 +115,25 @@ export function NetworkMap() {
       if (coords.lat) { lat = coords.lat; lng = coords.lng }
     }
 
-    // 4. Sauvegarde
-    const payload = { ...formData, fiche_pdf_url: pdfUrl, photo_url: photoUrl, lat, lng }
+    // 4. Nettoyage et Sauvegarde Base de données
+    // On extrait id et created_at pour ne PAS les envoyer dans la mise à jour
+    const { id, created_at, ...cleanFormData } = formData as any
+    const payload = { ...cleanFormData, fiche_pdf_url: pdfUrl, photo_url: photoUrl, lat, lng }
 
     if (editingId) {
-      await supabase.from("locaux_disponibles").update(payload).eq("id", editingId)
+      const { error } = await supabase.from("locaux_disponibles").update(payload).eq("id", editingId)
+      if (error) {
+        alert("Erreur lors de la modification : " + error.message)
+        setIsSubmitting(false)
+        return
+      }
     } else {
-      await supabase.from("locaux_disponibles").insert([payload])
+      const { error } = await supabase.from("locaux_disponibles").insert([payload])
+      if (error) {
+        alert("Erreur lors de la création : " + error.message)
+        setIsSubmitting(false)
+        return
+      }
     }
 
     setIsSubmitting(false)
