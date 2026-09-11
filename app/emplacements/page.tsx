@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+import { FolderPlus, Trash2 } from "lucide-react";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,12 +12,14 @@ const supabase = createClient(
 
 type EmplacementWithProspect = {
   id: number;
+  prospect_id: number;
   villes_recherchees: string;
   type_zone: string;
   timing_projet: string;
   surface_souhaitee_m2: number;
   statut_recherche: string;
   prospects: {
+    id: number;
     name?: string;
     nom?: string;
     prenom?: string;
@@ -32,28 +35,90 @@ export default function EmplacementsPage() {
   const [data, setData] = useState<EmplacementWithProspect[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchEmplacements = async () => {
+    const { data: emplacementsData, error } = await supabase
+      .from("emplacements")
+      .select("*, prospects(*)");
+
+    if (error) {
+      console.error("Erreur de récupération :", error);
+    } else {
+      setData(emplacementsData || []);
+    }
+    setLoading(false);
+  };
+
   useEffect(() => {
     const checkAuthAndFetch = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
         router.push("/login");
         return;
       }
-
-      const { data: emplacementsData, error } = await supabase
-        .from("emplacements")
-        .select("*, prospects(*)");
-
-      if (error) {
-        console.error("Erreur de récupération :", error);
-      } else {
-        setData(emplacementsData || []);
-      }
-      setLoading(false);
+      await fetchEmplacements();
     };
 
     checkAuthAndFetch();
   }, [router]);
+
+  // Action : Supprimer une recherche d'emplacement
+  const handleSupprimer = async (id: number) => {
+    if (!confirm("Voulez-vous vraiment retirer cette recherche d'emplacement ?")) return;
+
+    const { error } = await supabase.from("emplacements").delete().eq("id", id);
+
+    if (error) {
+      alert("Erreur lors de la suppression : " + error.message);
+    } else {
+      setData((prev) => prev.filter((item) => item.id !== id));
+    }
+  };
+
+  // Action : Basculer vers Dossiers & Projets (et supprimer des emplacements)
+  const handlePasserEnDossier = async (item: EmplacementWithProspect) => {
+    const nomCandidat =
+      item.prospects?.name ||
+      `${item.prospects?.prenom || ""} ${item.prospects?.nom || ""}`.trim() ||
+      "ce candidat";
+
+    const adresseExacte = prompt(
+      `Saisissez l'adresse du local trouvé pour ${nomCandidat} :`,
+      item.villes_recherchees
+    );
+
+    if (adresseExacte === null) return; // Annulation par l'utilisateur
+
+    // 1. Création du dossier dans la table dossiers
+    const { error: dossierError } = await supabase.from("dossiers").insert([
+      {
+        prospect_id: item.prospect_id,
+        adresse_local: adresseExacte,
+        surface_local: item.surface_souhaitee_m2 || 0,
+        statut_dossier: "En cours",
+        statut_financement: "En cours",
+      },
+    ]);
+
+    if (dossierError) {
+      alert("Erreur lors de la création du dossier projet : " + dossierError.message);
+      return;
+    }
+
+    // 2. Suppression de l'emplacement
+    const { error: deleteError } = await supabase
+      .from("emplacements")
+      .delete()
+      .eq("id", item.id);
+
+    if (deleteError) {
+      alert("Le dossier a été créé mais une erreur est survenue lors du retrait de l'emplacement.");
+    } else {
+      alert(`Dossier créé avec succès pour ${nomCandidat} ! La recherche a été retirée.`);
+      setData((prev) => prev.filter((emp) => emp.id !== item.id));
+    }
+  };
 
   const handleExportCSV = () => {
     if (data.length === 0) {
@@ -61,13 +126,18 @@ export default function EmplacementsPage() {
       return;
     }
 
-    const headers = ["Villes recherchees", "Type de zone", "Timing projet", "Surface souhaitee (m2)"];
+    const headers = [
+      "Villes recherchees",
+      "Type de zone",
+      "Timing projet",
+      "Surface souhaitee (m2)",
+    ];
 
     const rows = data.map((item) => [
       `"${item.villes_recherchees || ""}"`,
       `"${item.type_zone || ""}"`,
       `"${item.timing_projet || ""}"`,
-      `"${item.surface_souhaitee_m2 || ""}"`
+      `"${item.surface_souhaitee_m2 || ""}"`,
     ]);
 
     const csvContent =
@@ -77,14 +147,21 @@ export default function EmplacementsPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `export_agents_acuitis_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute(
+      "download",
+      `export_agents_acuitis_${new Date().toISOString().slice(0, 10)}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   if (loading) {
-    return <div className="min-h-screen bg-black text-white p-8 flex items-center justify-center">Chargement…</div>;
+    return (
+      <div className="min-h-screen bg-black text-white p-8 flex items-center justify-center">
+        Chargement…
+      </div>
+    );
   }
 
   return (
@@ -120,20 +197,23 @@ export default function EmplacementsPage() {
                 <th className="p-4">Timing</th>
                 <th className="p-4">Surface</th>
                 <th className="p-4">Statut</th>
+                <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
               {data.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-6 text-center text-gray-500">
-                    Aucun emplacement en cours de recherche.
+                  <td colSpan={9} className="p-6 text-center text-gray-500">
+                    Aucune recherche d'emplacement en cours.
                   </td>
                 </tr>
               ) : (
                 data.map((item) => {
                   const prospect = item.prospects;
                   const nomAffiche = prospect
-                    ? prospect.name || `${prospect.prenom || ""} ${prospect.nom || ""}`.trim() || "Candidat sans nom"
+                    ? prospect.name ||
+                      `${prospect.prenom || ""} ${prospect.nom || ""}`.trim() ||
+                      "Candidat sans nom"
                     : "Candidat inconnu";
 
                   return (
@@ -141,24 +221,55 @@ export default function EmplacementsPage() {
                       <td className="p-4 font-medium">{nomAffiche}</td>
                       <td className="p-4 text-gray-300">
                         <div>{prospect?.telephone || "-"}</div>
-                        <div className="text-xs text-gray-500">{prospect?.email || "-"}</div>
+                        <div className="text-xs text-gray-500">
+                          {prospect?.email || "-"}
+                        </div>
                       </td>
                       <td className="p-4 text-gray-300">
                         <div>{prospect?.metier || "-"}</div>
                         <div className="text-xs text-gray-500">
-                          {prospect?.apport ? `${prospect.apport.toLocaleString()} €` : "-"}
+                          {prospect?.apport
+                            ? `${prospect.apport.toLocaleString()} €`
+                            : "-"}
                         </div>
                       </td>
-                      <td className="p-4 font-semibold text-white">{item.villes_recherchees}</td>
-                      <td className="p-4 text-gray-300 uppercase text-xs font-mono">{item.type_zone || "Tous"}</td>
-                      <td className="p-4 text-gray-300">{item.timing_projet || "-"}</td>
+                      <td className="p-4 font-semibold text-white">
+                        {item.villes_recherchees}
+                      </td>
+                      <td className="p-4 text-gray-300 uppercase text-xs font-mono">
+                        {item.type_zone || "Tous"}
+                      </td>
                       <td className="p-4 text-gray-300">
-                        {item.surface_souhaitee_m2 ? `${item.surface_souhaitee_m2} m²` : "-"}
+                        {item.timing_projet || "-"}
+                      </td>
+                      <td className="p-4 text-gray-300">
+                        {item.surface_souhaitee_m2
+                          ? `${item.surface_souhaitee_m2} m²`
+                          : "-"}
                       </td>
                       <td className="p-4">
                         <span className="px-2 py-1 rounded text-xs bg-blue-900/50 text-blue-300 border border-blue-800">
                           {item.statut_recherche || "en_recherche"}
                         </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handlePasserEnDossier(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded transition"
+                            title="Créer le dossier et retirer de la recherche"
+                          >
+                            <FolderPlus className="w-3.5 h-3.5" />
+                            Passer en Projet
+                          </button>
+                          <button
+                            onClick={() => handleSupprimer(item.id)}
+                            className="p-1 text-gray-400 hover:text-red-400 transition"
+                            title="Retirer la recherche"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
