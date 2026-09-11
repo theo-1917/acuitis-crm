@@ -2,10 +2,10 @@
 
 import { useRouter } from "next/navigation"
 import {
+  Building2,
   CheckSquare,
   FolderKanban,
   LayoutDashboard,
-  Map,
   MapPin,
   Table2,
   TrendingUp,
@@ -52,8 +52,8 @@ export function Dashboard() {
                 Dossiers & Projets
               </TabsTrigger>
               <TabsTrigger value="carte">
-                <Map data-icon="inline-start" />
-                Carte Réseau
+                <Building2 data-icon="inline-start" />
+                Recherche de candidat
               </TabsTrigger>
               <TabsTrigger value="missions">
                 <CheckSquare data-icon="inline-start" />
