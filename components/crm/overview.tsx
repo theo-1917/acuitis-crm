@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   AlertCircle,
   Building2,
@@ -10,6 +11,8 @@ import {
   FolderKanban,
   ArrowRight,
   Users,
+  MapPin,
+  TrendingUp
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,6 +20,7 @@ import { supabase } from "@/lib/supabase"
 
 type KpiData = {
   prospectsCount: number
+  emplacementsCount: number
   dossiersCount: number
   locauxCount: number
   missionsCount: number
@@ -32,21 +36,30 @@ type Mission = {
 }
 
 export function Overview() {
-  const [kpis, setKpis] = useState<KpiData>({ prospectsCount: 0, dossiersCount: 0, locauxCount: 0, missionsCount: 0 })
+  const router = useRouter()
+  const [kpis, setKpis] = useState<KpiData>({ 
+    prospectsCount: 0, 
+    emplacementsCount: 0, 
+    dossiersCount: 0, 
+    locauxCount: 0, 
+    missionsCount: 0 
+  })
   const [urgentMissions, setUrgentMissions] = useState<Mission[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchDashboardData = async () => {
     setLoading(true)
 
-    // Lancement des requêtes en parallèle pour plus de rapidité
+    // Lancement de toutes les requêtes en parallèle
     const [
       { count: prospectsCount },
+      { count: emplacementsCount },
       { count: dossiersCount },
       { count: locauxCount },
       { data: missionsData }
     ] = await Promise.all([
-      supabase.from("prospects").select("*", { count: "exact", head: true }),
+      supabase.from("prospects").select("*", { count: "exact", head: true }), // Bientôt filtré par actif=true
+      supabase.from("emplacements").select("*", { count: "exact", head: true }),
       supabase.from("dossiers").select("*", { count: "exact", head: true }).eq('statut_dossier', 'En cours'),
       supabase.from("locaux_disponibles").select("*", { count: "exact", head: true }).eq('statut', 'Disponible'),
       supabase.from("missions").select("*").eq('terminee', false)
@@ -54,15 +67,15 @@ export function Overview() {
 
     setKpis({
       prospectsCount: prospectsCount || 0,
+      emplacementsCount: emplacementsCount || 0,
       dossiersCount: dossiersCount || 0,
       locauxCount: locauxCount || 0,
       missionsCount: missionsData ? missionsData.length : 0
     })
 
-    // Filtrer les missions à moins de 3 jours ou en retard
     if (missionsData) {
       const today = new Date()
-      today.setHours(0, 0, 0, 0) // On remet à minuit pour comparer juste les jours
+      today.setHours(0, 0, 0, 0)
       
       const inThreeDays = new Date(today)
       inThreeDays.setDate(today.getDate() + 3)
@@ -84,7 +97,6 @@ export function Overview() {
     fetchDashboardData()
   }, [])
 
-  // Calcul du statut de la date (En retard, Aujourd'hui, ou J-X)
   const getDaysRemainingInfo = (dateStr: string) => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -98,6 +110,14 @@ export function Overview() {
     if (diffDays === 0) return { label: "Aujourd'hui", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" }
     if (diffDays === 1) return { label: "Demain", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" }
     return { label: `J-${diffDays}`, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" }
+  }
+
+  // Fonction pour simuler un clic sur les onglets de navigation
+  const goToTab = (tabValue: string) => {
+    const tabTrigger = document.querySelector(`button[value="${tabValue}"]`) as HTMLButtonElement
+    if (tabTrigger) {
+      tabTrigger.click()
+    }
   }
 
   if (loading) {
@@ -115,20 +135,28 @@ export function Overview() {
         </p>
       </div>
 
-      {/* Ligne des KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Ligne des KPIs (Passée à 5 colonnes) */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
           <div className="flex items-center gap-3 text-muted-foreground mb-2">
             <Users className="h-5 w-5 text-primary" />
-            <h3 className="text-sm font-semibold">Prospects Actifs</h3>
+            <h3 className="text-sm font-semibold truncate">Prospects Actifs</h3>
           </div>
           <div className="text-3xl font-bold text-foreground">{kpis.prospectsCount}</div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
           <div className="flex items-center gap-3 text-muted-foreground mb-2">
+            <MapPin className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold truncate">Recherches Locaux</h3>
+          </div>
+          <div className="text-3xl font-bold text-foreground">{kpis.emplacementsCount}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
+          <div className="flex items-center gap-3 text-muted-foreground mb-2">
             <FolderKanban className="h-5 w-5 text-primary" />
-            <h3 className="text-sm font-semibold">Projets en cours</h3>
+            <h3 className="text-sm font-semibold truncate">Projets en cours</h3>
           </div>
           <div className="text-3xl font-bold text-foreground">{kpis.dossiersCount}</div>
         </div>
@@ -136,7 +164,7 @@ export function Overview() {
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
           <div className="flex items-center gap-3 text-muted-foreground mb-2">
             <Building2 className="h-5 w-5 text-primary" />
-            <h3 className="text-sm font-semibold">Locaux Disponibles</h3>
+            <h3 className="text-sm font-semibold truncate">Locaux Disponibles</h3>
           </div>
           <div className="text-3xl font-bold text-foreground">{kpis.locauxCount}</div>
         </div>
@@ -144,7 +172,7 @@ export function Overview() {
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col justify-center">
           <div className="flex items-center gap-3 text-muted-foreground mb-2">
             <CheckSquare className="h-5 w-5 text-primary" />
-            <h3 className="text-sm font-semibold">Missions ouvertes</h3>
+            <h3 className="text-sm font-semibold truncate">Missions ouvertes</h3>
           </div>
           <div className="text-3xl font-bold text-foreground">{kpis.missionsCount}</div>
         </div>
@@ -198,7 +226,7 @@ export function Overview() {
           </div>
         </div>
 
-        {/* BLOC RACCOURCIS & ACTIVITÉS (Peut être étendu plus tard) */}
+        {/* BLOC RACCOURCIS & ACTIVITÉS */}
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col">
           <div className="flex items-center gap-2 border-b border-border pb-3 mb-4">
             <Clock className="h-5 w-5 text-primary" />
@@ -206,19 +234,31 @@ export function Overview() {
           </div>
 
           <div className="grid grid-cols-1 gap-3">
-            <Button variant="outline" className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50">
+            <Button 
+              variant="outline" 
+              onClick={() => goToTab('pipeline')}
+              className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50"
+            >
               <Users className="mr-3 h-4 w-4 text-primary" />
-              Ajouter un nouveau candidat
+              Gérer les candidats (Pipeline)
               <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
             </Button>
             
-            <Button variant="outline" className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50">
+            <Button 
+              variant="outline" 
+              onClick={() => goToTab('carte')}
+              className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50"
+            >
               <Building2 className="mr-3 h-4 w-4 text-primary" />
               Référencer un nouveau local
               <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
             </Button>
             
-            <Button variant="outline" className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50">
+            <Button 
+              variant="outline" 
+              onClick={() => goToTab('missions')}
+              className="justify-start h-12 border-border bg-muted/20 hover:bg-muted/50"
+            >
               <CheckSquare className="mr-3 h-4 w-4 text-primary" />
               Créer une nouvelle mission
               <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
@@ -228,7 +268,10 @@ export function Overview() {
           <div className="mt-8 rounded-lg bg-primary/10 border border-primary/20 p-4 text-center">
             <p className="text-sm font-medium text-primary mb-1">Simulateur de rentabilité</p>
             <p className="text-xs text-muted-foreground mb-3">Estimez la viabilité financière d'un projet pour un candidat franchisé.</p>
-            <Button size="sm" className="w-full">Ouvrir le simulateur ROI</Button>
+            <Button size="sm" className="w-full" onClick={() => goToTab('roi')}>
+              <TrendingUp className="mr-2 h-4 w-4" />
+              Ouvrir le simulateur ROI
+            </Button>
           </div>
         </div>
 
