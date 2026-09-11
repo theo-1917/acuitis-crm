@@ -21,7 +21,8 @@ type Prospect = {
   created_at: string
 }
 
-const COLUMNS = ["Nouveau", "Contacté", "RDV", "Négociation", "Signé", "Non qualifié", "Perdu"]
+// Colonnes ajustées selon tes besoins
+const COLUMNS = ["Nouveau", "Contacté", "RDV", "Non qualifié", "Perdu"]
 
 const PROVENANCES = [
   "Prospection téléphonique", "Site internet", "Contact SILMO", 
@@ -34,7 +35,6 @@ export function ProspectsPipeline() {
   const [loading, setLoading] = useState(true)
   const [showInactive, setShowInactive] = useState(false)
   
-  // Modal state
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [formData, setFormData] = useState<Partial<Prospect>>({
@@ -54,7 +54,6 @@ export function ProspectsPipeline() {
     fetchProspects()
   }, [])
 
-  // Action Manuelle : Activer / Archiver
   const handleToggleActif = async (p: Prospect) => {
     const { error } = await supabase.from("prospects").update({ actif: !p.actif }).eq("id", p.id)
     if (!error) {
@@ -62,7 +61,6 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Changement de colonne + Automatisation Inactif si Perdu ou Non qualifié
   const handleChangeStatus = async (id: number, newStatus: string) => {
     const isInactive = newStatus === "Non qualifié" || newStatus === "Perdu"
     const payload = { statut: newStatus, actif: !isInactive }
@@ -73,7 +71,6 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Bouton Carte : Lancer une recherche d'emplacement
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
@@ -116,7 +113,6 @@ export function ProspectsPipeline() {
     fetchProspects()
   }
 
-  // EXPORT 1 : Base de données brutes
   const handleExportData = () => {
     const headers = ["ID", "Nom", "Ville", "Téléphone", "Email", "Apport", "Statut", "Provenance", "Actif", "Date de création"]
     const rows = prospects.map(p => [
@@ -142,61 +138,68 @@ export function ProspectsPipeline() {
     document.body.removeChild(link)
   }
 
-  // EXPORT 2 : Rapport KPI Analytique
+  // EXPORT RAPPORT KPI ENRICHI (Croisement Mensuel & Annuel)
   const handleExportKPI = () => {
     const total = prospects.length
     const actifs = prospects.filter(p => p.actif).length
     const inactifs = total - actifs
 
-    // Stats par statut
-    const statsStatut = COLUMNS.map(col => {
-      const count = prospects.filter(p => (p.statut || "Nouveau") === col).length
-      return `${col};${count}`
-    })
-
-    // Stats par provenance
-    const statsProvenance = PROVENANCES.map(prov => {
-      const count = prospects.filter(p => (p.provenance || "Autre") === prov).length
-      return `${prov};${count}`
-    })
-
-    // Stats par Mois/Année
-    const monthCounts: Record<string, number> = {}
+    // Regroupement des prospects par Année et Mois
+    const prospectsByMonthYear: Record<string, Prospect[]> = {}
     prospects.forEach(p => {
-      const date = new Date(p.created_at)
-      const monthYear = date.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
-      monthCounts[monthYear] = (monthCounts[monthYear] || 0) + 1
+      const d = new Date(p.created_at)
+      if (isNaN(d.getTime())) return
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!prospectsByMonthYear[key]) prospectsByMonthYear[key] = []
+      prospectsByMonthYear[key].push(p)
     })
-    const statsMois = Object.entries(monthCounts).map(([mois, count]) => `${mois};${count}`)
 
-    // Construction du fichier CSV (Multi-sections)
+    const sortedMonthKeys = Object.keys(prospectsByMonthYear).sort()
+
+    // 1. Ventilation des Statuts par Mois & Année
+    const statusByMonthHeader = `Période (Mois/Année);${COLUMNS.join(";")};Total`
+    const statusByMonthLines = sortedMonthKeys.map(key => {
+      const list = prospectsByMonthYear[key]
+      const [year, month] = key.split('-')
+      const monthLabel = new Date(Number(year), Number(month) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      const counts = COLUMNS.map(col => list.filter(p => (p.statut || "Nouveau") === col).length)
+      return `"${monthLabel}";${counts.join(';')};${list.length}`
+    })
+
+    // 2. Ventilation des Provenances par Mois & Année
+    const provenanceByMonthHeader = `Période (Mois/Année);${PROVENANCES.join(";")};Total`
+    const provenanceByMonthLines = sortedMonthKeys.map(key => {
+      const list = prospectsByMonthYear[key]
+      const [year, month] = key.split('-')
+      const monthLabel = new Date(Number(year), Number(month) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      const counts = PROVENANCES.map(prov => list.filter(p => (p.provenance || "Autre") === prov).length)
+      return `"${monthLabel}";${counts.join(';')};${list.length}`
+    })
+
+    // Structuration finale du fichier
     const csvLines = [
-      "RAPPORT KPI - DÉVELOPPEMENT RÉSEAU ACUITIS",
+      "RAPPORT ANALYTIQUE ET KPI - DÉVELOPPEMENT RÉSEAU ACUITIS",
       `Date de l'export;${new Date().toLocaleDateString("fr-FR")}`,
       "",
-      "--- 1. STATISTIQUES GLOBALES ---",
-      `Total Candidats;${total}`,
-      `Candidats Actifs;${actifs}`,
-      `Candidats Inactifs (Perdus/Archivés);${inactifs}`,
+      "--- 1. INDICATEURS CLÉS GLOBAUX ---",
+      `Total des candidatures enregistrées;${total}`,
+      `Candidats actifs en cours de suivi;${actifs}`,
+      `Candidats inactifs (Non qualifiés / Perdus / Archivés);${inactifs}`,
       "",
-      "--- 2. RÉPARTITION PAR STATUT (PIPELINE) ---",
-      "Statut;Nombre",
-      ...statsStatut,
+      "--- 2. RÉPARTITION DES STATUTS PAR MOIS ET ANNÉE ---",
+      statusByMonthHeader,
+      ...statusByMonthLines,
       "",
-      "--- 3. PERFORMANCE DES SOURCES (PROVENANCE) ---",
-      "Source d'acquisition;Nombre de candidats",
-      ...statsProvenance,
-      "",
-      "--- 4. DYNAMIQUE DE RECRUTEMENT (PAR MOIS) ---",
-      "Mois;Nouveaux candidats",
-      ...statsMois
+      "--- 3. PERFORMANCE DES SOURCES (PROVENANCE) PAR MOIS ET ANNÉE ---",
+      provenanceByMonthHeader,
+      ...provenanceByMonthLines,
     ]
 
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvLines.join("\n")
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement("a")
     link.href = encodedUri
-    link.download = `rapport_kpi_franchise_${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `rapport_kpi_mensuel_${new Date().toISOString().slice(0, 10)}.csv`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -209,7 +212,6 @@ export function ProspectsPipeline() {
   return (
     <div className="flex flex-col gap-6 h-[calc(100vh-140px)]">
       
-      {/* En-tête avec les nouveaux boutons d'export */}
       <div className="flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-foreground">Pipeline Prospects</h2>
@@ -222,7 +224,7 @@ export function ProspectsPipeline() {
           </Button>
 
           <Button variant="outline" size="sm" onClick={handleExportKPI} className="border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs">
-            <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI
+            <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI Mensuel
           </Button>
 
           <div className="w-px h-6 bg-border mx-1 hidden sm:block"></div>
@@ -238,7 +240,6 @@ export function ProspectsPipeline() {
         </div>
       </div>
 
-      {/* Kanban Board */}
       <div className="flex gap-4 overflow-x-auto pb-4 h-full">
         {COLUMNS.map(column => {
           const columnProspects = displayedProspects.filter(p => (p.statut || "Nouveau") === column)
@@ -283,7 +284,6 @@ export function ProspectsPipeline() {
                       </span>
                       
                       <div className="flex items-center gap-1 shrink-0">
-                        {/* Bouton pour basculer vers Recherche Emplacements */}
                         <Button 
                           variant="ghost" 
                           size="sm" 
