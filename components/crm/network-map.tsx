@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
 import { formatEuro } from "@/lib/crm-data"
 
-// Chargement de la carte uniquement côté client pour éviter les erreurs Next.js
 const MapView = dynamic(() => import("./map-view"), { 
   ssr: false, 
   loading: () => <div className="h-full w-full bg-muted/10 rounded-xl flex items-center justify-center animate-pulse border border-border">Chargement de la carte...</div>
@@ -58,7 +57,6 @@ export function NetworkMap() {
 
   useEffect(() => { fetchLocaux() }, [])
 
-  // Fonction pour transformer une adresse en coordonnées GPS
   const geocodeAddress = async (adresse: string, ville: string) => {
     try {
       const query = encodeURIComponent(`${adresse ? adresse + ", " : ""}${ville}, France`)
@@ -86,7 +84,13 @@ export function NetworkMap() {
       const fileExt = pdfFile.name.split(".").pop()
       const fileName = `pdf_${Date.now()}.${fileExt}`
       const { error } = await supabase.storage.from("fiches_locaux").upload(fileName, pdfFile)
-      if (!error) pdfUrl = supabase.storage.from("fiches_locaux").getPublicUrl(fileName).data.publicUrl
+      
+      if (error) {
+        alert("Erreur lors de l'envoi du PDF : " + error.message)
+        setIsSubmitting(false)
+        return
+      }
+      pdfUrl = supabase.storage.from("fiches_locaux").getPublicUrl(fileName).data.publicUrl
     }
 
     // 2. Upload Photo
@@ -94,7 +98,13 @@ export function NetworkMap() {
       const fileExt = photoFile.name.split(".").pop()
       const fileName = `photo_${Date.now()}.${fileExt}`
       const { error } = await supabase.storage.from("photos_locaux").upload(fileName, photoFile)
-      if (!error) photoUrl = supabase.storage.from("photos_locaux").getPublicUrl(fileName).data.publicUrl
+      
+      if (error) {
+        alert("Erreur lors de l'envoi de la photo : " + error.message)
+        setIsSubmitting(false)
+        return
+      }
+      photoUrl = supabase.storage.from("photos_locaux").getPublicUrl(fileName).data.publicUrl
     }
 
     // 3. Géocodage (Recherche GPS)
@@ -105,7 +115,7 @@ export function NetworkMap() {
       if (coords.lat) { lat = coords.lat; lng = coords.lng }
     }
 
-    // 4. Sauvegarde Base de données
+    // 4. Sauvegarde
     const payload = { ...formData, fiche_pdf_url: pdfUrl, photo_url: photoUrl, lat, lng }
 
     if (editingId) {
@@ -165,7 +175,7 @@ export function NetworkMap() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 flex-1">
         
-        {/* COLONNE GAUCHE : LISTE DES LOCAUX */}
+        {/* COLONNE GAUCHE */}
         <div className="lg:col-span-5 flex flex-col gap-4 overflow-y-auto pr-2 pb-4">
           {locaux.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground text-sm">
@@ -236,11 +246,10 @@ export function NetworkMap() {
           )}
         </div>
 
-        {/* COLONNE DROITE : CARTE INTERACTIVE */}
+        {/* COLONNE DROITE : CARTE */}
         <div className="lg:col-span-7 h-full min-h-[400px] rounded-xl overflow-hidden border border-border shadow-lg">
            <MapView locaux={locaux} onSelect={() => {}} />
         </div>
-
       </div>
 
       {/* Modal Ajout/Modification */}
@@ -287,10 +296,12 @@ export function NetworkMap() {
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Photo du local (JPG/PNG)</label>
                   <Input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} className="text-xs" />
+                  {formData.photo_url && !photoFile && <span className="text-[10px] text-emerald-500 block mt-1">✓ Photo actuelle sauvegardée</span>}
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Fiche détaillée (PDF)</label>
                   <Input type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files?.[0] || null)} className="text-xs" />
+                  {formData.fiche_pdf_url && !pdfFile && <span className="text-[10px] text-emerald-500 block mt-1">✓ Fiche PDF actuelle sauvegardée</span>}
                 </div>
               </div>
 
