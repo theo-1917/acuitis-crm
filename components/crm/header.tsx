@@ -154,13 +154,12 @@ export function Header() {
         emplacements: emplacementsReq.data
       }, null, 2))
 
-      // 3. ASPIRATION DES FICHIERS (BUCKETS STORAGE)
-      // ICI : Liste des noms possibles pour ton espace de stockage. Change-les si besoin !
-      const BUCKETS_A_SAUVEGARDER = ["documents", "fichiers", "locaux", "dossiers", "photos", "pieces_jointes"]
+      // 3. ASPIRATION DES FICHIERS (AVEC LES NOMS EXACTS DE LA CAPTURE)
+      const BUCKETS_A_SAUVEGARDER = ["photos_locaux", "fiches_locaux", "documents"]
       const f5 = zip.folder("5_Fichiers_et_Pieces_Jointes")
 
       for (const bucket of BUCKETS_A_SAUVEGARDER) {
-        // Ajout de paramètre vide '' pour lister à la racine du bucket
+        // Liste à la racine du bucket
         const { data: files, error: listError } = await supabase.storage.from(bucket).list('')
         
         if (listError) {
@@ -172,12 +171,14 @@ export function Header() {
           const bucketFolder = f5?.folder(bucket) 
           
           for (const file of files) {
+            // Ignorer les dossiers ou fichiers vides
             if (file.name === '.emptyFolderPlaceholder' || !file.id) continue;
             
+            // Télécharger le fichier
             const { data: fileData, error: downloadError } = await supabase.storage.from(bucket).download(file.name)
             
             if (downloadError) {
-              console.error(`Erreur téléchargement ${file.name}:`, downloadError.message)
+              console.error(`Erreur téléchargement ${file.name} depuis ${bucket}:`, downloadError.message)
             } else if (fileData) {
               bucketFolder?.file(file.name, fileData)
             }
