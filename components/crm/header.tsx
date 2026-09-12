@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { Bell, Search, Plus, LogOut, MapPin, Users, Loader2, X, Building2 } from "lucide-react"
+import { Bell, Search, Plus, LogOut, Users, Loader2, X, Building2, DownloadCloud } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
+import JSZip from "jszip"
 
 const COLUMNS = ["Nouveau", "Contacté", "RDV", "Validé", "Non qualifié", "Perdu"]
 const PROVENANCES = ["Prospection téléphonique", "Site internet", "Contact SILMO", "Cooptation", "Bouche à oreille", "L'express franchise", "Recruteur", "Prospection linkedin", "Mailing", "Autre"]
@@ -14,7 +15,7 @@ const PROVENANCES = ["Prospection téléphonique", "Site internet", "Contact SIL
 export function Header() {
   const router = useRouter()
   
-  // États de l'utilisateur connecté
+  // États utilisateur
   const [userInitials, setUserInitials] = useState("..")
   const [userEmail, setUserEmail] = useState("")
 
@@ -28,16 +29,17 @@ export function Header() {
   // États Cloche
   const [urgentCount, setUrgentCount] = useState(0)
 
-  // États Menus
+  // États Menus & Backup
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [isBackingUp, setIsBackingUp] = useState(false)
+
+  // Modal d'ajout rapide
   const [showAddModal, setShowAddModal] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
   const [formData, setFormData] = useState({
     name: "", telephone: "", email: "", ville: "", apport: "", statut: "Nouveau", provenance: "Site internet", actif: true
   })
 
-  // 1. Récupération de l'utilisateur connecté (Email + Initiales)
   useEffect(() => {
     const fetchUser = async () => {
       const { data: { session } } = await supabase.auth.getSession()
@@ -49,7 +51,6 @@ export function Header() {
     fetchUser()
   }, [])
 
-  // 2. Chargement des missions urgentes (Sécurisé)
   useEffect(() => {
     const fetchUrgentMissions = async () => {
       try {
@@ -69,13 +70,12 @@ export function Header() {
           setUrgentCount(count)
         }
       } catch (err) {
-        console.error("Erreur chargement missions :", err)
+        console.error("Erreur missions :", err)
       }
     }
     fetchUrgentMissions()
   }, [])
 
-  // 3. Moteur de recherche globale
   useEffect(() => {
     const delayDebounce = setTimeout(async () => {
       if (searchQuery.length < 2) {
@@ -84,39 +84,26 @@ export function Header() {
         return
       }
       setIsSearching(true)
-
       try {
         const [{ data: prospects }, { data: locaux }] = await Promise.all([
           supabase.from('prospects').select('id, name, ville, email, statut').or(`name.ilike.%${searchQuery}%,ville.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`).limit(3),
           supabase.from('locaux_disponibles').select('id, ville, adresse, statut').or(`ville.ilike.%${searchQuery}%,adresse.ilike.%${searchQuery}%`).limit(3)
         ])
-
         const results = []
-        if (prospects) {
-          prospects.forEach(p => results.push({ type: 'prospect', id: p.id, title: p.name, subtitle: p.ville || p.email, badge: p.statut }))
-        }
-        if (locaux) {
-          locaux.forEach(l => results.push({ type: 'local', id: l.id, title: l.ville, subtitle: l.adresse, badge: l.statut }))
-        }
-
+        if (prospects) prospects.forEach(p => results.push({ type: 'prospect', id: p.id, title: p.name, subtitle: p.ville || p.email, badge: p.statut }))
+        if (locaux) locaux.forEach(l => results.push({ type: 'local', id: l.id, title: l.ville, subtitle: l.adresse, badge: l.statut }))
+        
         setSearchResults(results)
         setShowSearchDropdown(true)
-      } catch (err) {
-        console.error("Erreur recherche :", err)
-      }
-      
+      } catch (err) { console.error("Erreur recherche :", err) }
       setIsSearching(false)
     }, 300)
-
     return () => clearTimeout(delayDebounce)
   }, [searchQuery])
 
-  // Fermer les popups si on clique à côté
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setShowSearchDropdown(false)
-      }
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) setShowSearchDropdown(false)
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
@@ -126,6 +113,72 @@ export function Header() {
     await supabase.auth.signOut()
     router.push("/")
     router.refresh()
+  }
+
+  // === FONCTION DE BACKUP COMPLET (Dossier ZIP) ===
+  const handleBackup = async () => {
+    setIsBackingUp(true)
+    try {
+      // 1. Aspiration de TOUTES les tables de la base de données
+      const [prospectsReq, dossiersReq, locauxReq, missionsReq, emplacementsReq] = await Promise.all([
+        supabase.from('prospects').select('*'),
+        supabase.from('dossiers').select('*'),
+        supabase.from('locaux_disponibles').select('*'),
+        supabase.from('missions').select('*'),
+        supabase.from('emplacements').select('*'),
+      ])
+
+      const zip = new JSZip()
+
+      // Convertisseur en format Excel CSV
+      const toCSV = (data: any[]) => {
+        if (!data || data.length === 0) return ""
+        const headers = Object.keys(data[0])
+        const rows = data.map(row => headers.map(h => {
+          const val = row[h]
+          if (val === null || val === undefined) return '""'
+          return `"${val.toString().replace(/"/g, '""')}"`
+        }).join(";"))
+        return [headers.join(";"), ...rows].join("\n")
+      }
+
+      // 2. Structuration du dossier compressé
+      const f1 = zip.folder("1_Prospects_et_Candidats")
+      f1?.file("tous_les_prospects.csv", "\uFEFF" + toCSV(prospectsReq.data || []))
+
+      const f2 = zip.folder("2_Dossiers_et_Projets")
+      f2?.file("dossiers_franchises.csv", "\uFEFF" + toCSV(dossiersReq.data || []))
+      f2?.file("recherches_emplacements.csv", "\uFEFF" + toCSV(emplacementsReq.data || []))
+
+      const f3 = zip.folder("3_Locaux_Disponibles")
+      f3?.file("locaux_commerciaux.csv", "\uFEFF" + toCSV(locauxReq.data || []))
+
+      const f4 = zip.folder("4_Missions")
+      f4?.file("missions_et_rappels.csv", "\uFEFF" + toCSV(missionsReq.data || []))
+
+      // 3. Ajout de la sauvegarde "Developpeur" (JSON pur)
+      zip.file("sauvegarde_integrale_bdd.json", JSON.stringify({
+        prospects: prospectsReq.data,
+        dossiers: dossiersReq.data,
+        locaux: locauxReq.data,
+        missions: missionsReq.data,
+        emplacements: emplacementsReq.data
+      }, null, 2))
+
+      // 4. Génération et téléchargement
+      const content = await zip.generateAsync({ type: "blob" })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(content)
+      link.download = `Backup_Acuitis_CRM_${new Date().toISOString().slice(0, 10)}.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+    } catch (e) {
+      console.error("Erreur backup:", e)
+      alert("Une erreur est survenue lors de la création de la sauvegarde.")
+    }
+    setIsBackingUp(false)
   }
 
   const handleAddProspect = async (e: React.FormEvent) => {
@@ -141,26 +194,20 @@ export function Header() {
       alert(`Le prospect ${formData.name} a été ajouté avec succès !`)
       setShowAddModal(false)
       setFormData({ name: "", telephone: "", email: "", ville: "", apport: "", statut: "Nouveau", provenance: "Site internet", actif: true })
-    } else {
-      alert("Erreur lors de l'ajout : " + error.message)
-    }
+    } else { alert("Erreur lors de l'ajout : " + error.message) }
   }
 
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-6 relative z-40">
       
-      {/* LOGO */}
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-bold text-primary-foreground shadow-lg">
-          A
-        </div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-bold text-primary-foreground shadow-lg">A</div>
         <div className="hidden sm:block">
           <h1 className="text-lg font-bold leading-tight text-foreground">Acuitis CRM</h1>
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Développement Réseau</p>
         </div>
       </div>
 
-      {/* BARRE DE RECHERCHE CENTRALE */}
       <div className="flex flex-1 items-center justify-center px-6" ref={searchRef}>
         <div className="relative w-full max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -171,11 +218,8 @@ export function Header() {
             onChange={(e) => setSearchQuery(e.target.value)}
             onFocus={() => { if (searchQuery.length >= 2) setShowSearchDropdown(true) }}
           />
-          {isSearching && (
-            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground animate-spin" />
-          )}
+          {isSearching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground animate-spin" />}
 
-          {/* MENU DÉROULANT */}
           {showSearchDropdown && (
             <div className="absolute top-12 left-0 w-full bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
               {searchResults.length === 0 && !isSearching ? (
@@ -186,10 +230,7 @@ export function Header() {
                     <div 
                       key={idx} 
                       className="flex items-center justify-between px-4 py-2 hover:bg-muted/50 cursor-pointer transition"
-                      onClick={() => {
-                        setShowSearchDropdown(false)
-                        setSearchQuery("")
-                      }}
+                      onClick={() => { setShowSearchDropdown(false); setSearchQuery(""); }}
                     >
                       <div className="flex items-center gap-3">
                         {item.type === 'prospect' ? <Users className="h-4 w-4 text-primary" /> : <Building2 className="h-4 w-4 text-emerald-500" />}
@@ -208,16 +249,10 @@ export function Header() {
         </div>
       </div>
 
-      {/* BOUTONS DROITE & UTILISATEUR */}
       <div className="flex items-center gap-4">
-        
         <button className="relative rounded-full p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground">
           <Bell className="h-5 w-5" />
-          {urgentCount > 0 && (
-            <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white ring-2 ring-card">
-              {urgentCount}
-            </span>
-          )}
+          {urgentCount > 0 && <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white ring-2 ring-card">{urgentCount}</span>}
         </button>
 
         <Button size="sm" onClick={() => setShowAddModal(true)} className="hidden md:flex">
@@ -227,36 +262,45 @@ export function Header() {
         <div className="relative">
           <button 
             type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setShowUserMenu(!showUserMenu)
-            }}
+            onClick={(e) => { e.stopPropagation(); setShowUserMenu(!showUserMenu); }}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-sm font-bold text-primary transition hover:border-primary uppercase"
           >
             {userInitials}
           </button>
 
           {showUserMenu && (
-            <div className="absolute right-0 top-12 w-56 rounded-lg border border-border bg-card shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-12 w-64 rounded-lg border border-border bg-card shadow-xl z-50 overflow-hidden">
               <div className="px-4 py-3 border-b border-border bg-muted/20">
-                <p className="text-sm font-semibold text-foreground truncate" title={userEmail}>
-                  {userEmail || "Mon Compte"}
-                </p>
+                <p className="text-sm font-semibold text-foreground truncate" title={userEmail}>{userEmail || "Mon Compte"}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Admin Réseau Acuitis</p>
               </div>
-              <button 
-                type="button"
-                onClick={handleLogout}
-                className="w-full flex items-center px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-500 transition text-left cursor-pointer"
-              >
-                <LogOut className="mr-2 h-4 w-4" /> Se déconnecter
-              </button>
+              
+              <div className="flex flex-col p-1">
+                <button 
+                  type="button"
+                  onClick={handleBackup}
+                  disabled={isBackingUp}
+                  className="w-full flex items-center px-3 py-2.5 text-sm text-foreground hover:bg-muted/50 rounded-md transition text-left cursor-pointer disabled:opacity-50"
+                >
+                  {isBackingUp ? <Loader2 className="mr-2 h-4 w-4 animate-spin text-primary" /> : <DownloadCloud className="mr-2 h-4 w-4 text-primary" />}
+                  {isBackingUp ? "Création du dossier ZIP..." : "Sauvegarder tout le CRM"}
+                </button>
+                
+                <div className="h-px bg-border my-1 mx-2"></div>
+                
+                <button 
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full flex items-center px-3 py-2.5 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-500 rounded-md transition text-left cursor-pointer"
+                >
+                  <LogOut className="mr-2 h-4 w-4" /> Se déconnecter
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* MODAL AJOUT */}
       {showAddModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
