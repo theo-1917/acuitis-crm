@@ -107,13 +107,36 @@ export function Header() {
     router.refresh()
   }
 
-  // === FONCTION DE BACKUP COMPLET (Données + Fichiers) ===
+  // Fonction récursive pour aspirer les sous-dossiers dans Supabase Storage
+  const downloadFolderRecursively = async (bucket: string, currentPath: string, zipFolder: any) => {
+    const { data: items, error } = await supabase.storage.from(bucket).list(currentPath)
+    if (error || !items) return
+
+    for (const item of items) {
+      if (item.name === '.emptyFolderPlaceholder') continue
+
+      const fullPath = currentPath ? `${currentPath}/${item.name}` : item.name
+      const isFolder = !item.id || !item.metadata
+
+      if (isFolder) {
+        const subZipFolder = zipFolder.folder(item.name)
+        await downloadFolderRecursively(bucket, fullPath, subZipFolder)
+      } else {
+        const { data: fileData } = await supabase.storage.from(bucket).download(fullPath)
+        if (fileData) {
+          zipFolder.file(item.name, fileData)
+        }
+      }
+    }
+  }
+
+  // === BACKUP COMPLET (Tables + Fichiers récursifs) ===
   const handleBackup = async () => {
     setIsBackingUp(true)
     try {
       const zip = new JSZip()
 
-      // 1. Aspiration des tables de la base de données
+      // 1. Tables de la BDD
       const [prospectsReq, dossiersReq, locauxReq, missionsReq, emplacementsReq] = await Promise.all([
         supabase.from('prospects').select('*'),
         supabase.from('dossiers').select('*'),
@@ -154,39 +177,18 @@ export function Header() {
         emplacements: emplacementsReq.data
       }, null, 2))
 
-      // 3. ASPIRATION DES FICHIERS (AVEC LES NOMS EXACTS DE LA CAPTURE)
+      // 2. Exploration récursive des Buckets Storage
       const BUCKETS_A_SAUVEGARDER = ["photos_locaux", "fiches_locaux", "documents"]
       const f5 = zip.folder("5_Fichiers_et_Pieces_Jointes")
 
       for (const bucket of BUCKETS_A_SAUVEGARDER) {
-        // Liste à la racine du bucket
-        const { data: files, error: listError } = await supabase.storage.from(bucket).list('')
-        
-        if (listError) {
-          console.warn(`Impossible de lire le bucket ${bucket}:`, listError.message)
-          continue
-        }
-        
-        if (files && files.length > 0) {
-          const bucketFolder = f5?.folder(bucket) 
-          
-          for (const file of files) {
-            // Ignorer les dossiers ou fichiers vides
-            if (file.name === '.emptyFolderPlaceholder' || !file.id) continue;
-            
-            // Télécharger le fichier
-            const { data: fileData, error: downloadError } = await supabase.storage.from(bucket).download(file.name)
-            
-            if (downloadError) {
-              console.error(`Erreur téléchargement ${file.name} depuis ${bucket}:`, downloadError.message)
-            } else if (fileData) {
-              bucketFolder?.file(file.name, fileData)
-            }
-          }
+        const bucketFolder = f5?.folder(bucket)
+        if (bucketFolder) {
+          await downloadFolderRecursively(bucket, "", bucketFolder)
         }
       }
 
-      // 4. Génération du fichier ZIP final
+      // 3. Téléchargement du ZIP
       const content = await zip.generateAsync({ type: "blob" })
       const link = document.createElement('a')
       link.href = URL.createObjectURL(content)
@@ -196,8 +198,8 @@ export function Header() {
       document.body.removeChild(link)
 
     } catch (e) {
-      console.error("Erreur backup:", e)
-      alert("Une erreur est survenue lors de la création de la sauvegarde. Regardez la console (F12) pour plus de détails.")
+      console.error("Erreur backup :", e)
+      alert("Une erreur est survenue lors de la création de la sauvegarde.")
     }
     setIsBackingUp(false)
   }
