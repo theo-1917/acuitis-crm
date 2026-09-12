@@ -21,7 +21,8 @@ type Prospect = {
   created_at: string
 }
 
-const COLUMNS = ["Nouveau", "Contacté", "RDV", "Non qualifié", "Perdu"]
+// L'ajout de la colonne "Validé" juste après RDV
+const COLUMNS = ["Nouveau", "Contacté", "RDV", "Validé", "Non qualifié", "Perdu"]
 
 const PROVENANCES = [
   "Prospection téléphonique", "Site internet", "Contact SILMO", 
@@ -53,6 +54,7 @@ export function ProspectsPipeline() {
     fetchProspects()
   }, [])
 
+  // Action bouton manuel (archiver / désarchiver)
   const handleToggleActif = async (p: Prospect) => {
     const { error } = await supabase.from("prospects").update({ actif: !p.actif }).eq("id", p.id)
     if (!error) {
@@ -60,7 +62,9 @@ export function ProspectsPipeline() {
     }
   }
 
+  // Changement de colonne avec le menu déroulant
   const handleChangeStatus = async (id: number, newStatus: string) => {
+    // Rend automatiquement inactif si c'est Perdu ou Non qualifié
     const isInactive = newStatus === "Non qualifié" || newStatus === "Perdu"
     const payload = { statut: newStatus, actif: !isInactive }
 
@@ -70,17 +74,17 @@ export function ProspectsPipeline() {
     }
   }
 
-  // CORRECTION ICI : Mise à jour visuelle instantanée (Optimistic Update)
+  // Action magique : Bouton Carte (Validation & Lancement Recherche)
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
 
-    // 1. Mise à jour immédiate de l'interface visuelle pour l'utilisateur
+    // 1. Déplacement visuel immédiat dans la colonne "Validé" (Optimistic update)
     setProspects(current => current.map(prov => 
-      prov.id === p.id ? { ...prov, statut: "En recherche", actif: false } : prov
+      prov.id === p.id ? { ...prov, statut: "Validé", actif: true } : prov
     ))
 
-    // 2. Création de la recherche d'emplacement en base
+    // 2. Création du projet de recherche (sans erreur type_zone)
     const { error: emplError } = await supabase.from("emplacements").insert([{
       prospect_id: p.id,
       villes_recherchees: villes,
@@ -91,21 +95,21 @@ export function ProspectsPipeline() {
 
     if (emplError) {
       alert("Erreur lors de la création de la recherche : " + emplError.message)
-      fetchProspects() // En cas d'erreur, on remet l'état initial
+      fetchProspects() // Rollback affichage
       return
     }
 
-    // 3. Mise à jour silencieuse du prospect en base
+    // 3. Sauvegarde du statut "Validé" en BDD
     const { error: prospectError } = await supabase.from("prospects").update({
-      statut: "En recherche",
-      actif: false
+      statut: "Validé",
+      actif: true // Reste visible dans le pipeline
     }).eq("id", p.id)
 
     if (prospectError) {
       alert("Erreur de mise à jour du statut : " + prospectError.message)
-      fetchProspects() // Rollback en cas d'erreur
+      fetchProspects()
     } else {
-      alert(`Félicitations ! ${p.name} est validé et transféré en Recherche d'emplacement.`)
+      alert(`Félicitations ! ${p.name} est désormais Validé et la recherche est lancée.`)
     }
   }
 
@@ -135,6 +139,7 @@ export function ProspectsPipeline() {
     fetchProspects()
   }
 
+  // --- EXPORT 1 : TABLEAU BRUT ---
   const handleExportData = () => {
     const headers = ["ID", "Nom", "Ville", "Téléphone", "Email", "Apport", "Statut", "Provenance", "Actif", "Date de création"]
     const rows = prospects.map(p => [
@@ -160,12 +165,14 @@ export function ProspectsPipeline() {
     document.body.removeChild(link)
   }
 
+  // --- EXPORT 2 : RAPPORT KPI STATISTIQUES ---
   const handleExportKPI = () => {
     const total = prospects.length
-    const actifs = prospects.filter(p => p.actif).length
-    const valides = prospects.filter(p => p.statut === "En recherche").length
+    const valides = prospects.filter(p => p.statut === "Validé").length
     const perdus = prospects.filter(p => p.statut === "Non qualifié" || p.statut === "Perdu").length
+    const enCours = total - valides - perdus
 
+    // Regroupement par Année et Mois
     const prospectsByMonthYear: Record<string, Prospect[]> = {}
     prospects.forEach(p => {
       const d = new Date(p.created_at)
@@ -176,17 +183,18 @@ export function ProspectsPipeline() {
     })
 
     const sortedMonthKeys = Object.keys(prospectsByMonthYear).sort()
-    const allStatutKeys = [...COLUMNS, "En recherche"]
 
-    const statusByMonthHeader = `Période (Mois/Année);${allStatutKeys.join(";")};Total`
+    // Construction dynamique : Tableau Statuts x Mois
+    const statusByMonthHeader = `Période (Mois/Année);${COLUMNS.join(";")};Total`
     const statusByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
       const [year, month] = key.split('-')
       const monthLabel = new Date(Number(year), Number(month) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-      const counts = allStatutKeys.map(col => list.filter(p => (p.statut || "Nouveau") === col).length)
+      const counts = COLUMNS.map(col => list.filter(p => (p.statut || "Nouveau") === col).length)
       return `"${monthLabel}";${counts.join(';')};${list.length}`
     })
 
+    // Construction dynamique : Tableau Provenances x Mois
     const provenanceByMonthHeader = `Période (Mois/Année);${PROVENANCES.join(";")};Total`
     const provenanceByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
@@ -200,14 +208,14 @@ export function ProspectsPipeline() {
       "RAPPORT ANALYTIQUE ET KPI - DÉVELOPPEMENT RÉSEAU ACUITIS",
       `Date de l'export;${new Date().toLocaleDateString("fr-FR")}`,
       "",
-      "--- 1. INDICATEURS CLÉS ET CONVERSION ---",
-      `Total des candidatures reçues;${total}`,
-      `Candidats en cours de qualification (Pipeline actif);${actifs}`,
-      `CANDIDATS VALIDÉS (Convertis en Recherche d'emplacement);${valides}`,
+      "--- 1. INDICATEURS CLÉS ET TAUX DE CONVERSION ---",
+      `Total des candidatures générées;${total}`,
+      `Candidats en cours de traitement;${enCours}`,
+      `CANDIDATS VALIDÉS (Recherche de locaux en cours);${valides}`,
       `Candidats non retenus (Non qualifiés / Perdus);${perdus}`,
       `Taux de transformation global;${total > 0 ? ((valides / total) * 100).toFixed(1) + "%" : "0%"}`,
       "",
-      "--- 2. VENTILATION DES STATUTS PAR MOIS ET ANNÉE ---",
+      "--- 2. PERFORMANCE DU TUNNEL (STATUTS) PAR MOIS ET ANNÉE ---",
       statusByMonthHeader,
       ...statusByMonthLines,
       "",
@@ -228,14 +236,13 @@ export function ProspectsPipeline() {
 
   if (loading) return <div className="p-4 text-muted-foreground">Chargement du pipeline...</div>
 
-  // On exclut les prospects qui ont le statut "En recherche" (à moins de cliquer sur le bouton Inactifs)
-  const displayedProspects = showInactive 
-    ? prospects 
-    : prospects.filter(p => p.actif !== false && p.statut !== "En recherche")
+  // N'affiche que les prospects Actifs (sauf si le bouton "Voir inactifs" est cliqué)
+  const displayedProspects = showInactive ? prospects : prospects.filter(p => p.actif !== false)
 
   return (
     <div className="flex flex-col gap-6 h-[calc(100vh-140px)]">
       
+      {/* En-tête + Boutons */}
       <div className="flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-foreground">Pipeline Prospects</h2>
@@ -244,18 +251,18 @@ export function ProspectsPipeline() {
         <div className="flex flex-wrap items-center gap-2">
           
           <Button variant="outline" size="sm" onClick={handleExportData} className="border-border bg-muted/20 text-xs">
-            <Download className="mr-2 h-3.5 w-3.5" /> Données (Excel)
+            <Download className="mr-2 h-3.5 w-3.5" /> Données Brutes (Excel)
           </Button>
 
-          <Button variant="outline" size="sm" onClick={handleExportKPI} className="border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs">
-            <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI Mensuel
+          <Button variant="outline" size="sm" onClick={handleExportKPI} className="border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold">
+            <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI & Conversion
           </Button>
 
           <div className="w-px h-6 bg-border mx-1 hidden sm:block"></div>
 
           <Button variant="outline" size="sm" onClick={() => setShowInactive(!showInactive)} className="text-xs">
             {showInactive ? <EyeOff className="mr-2 h-3.5 w-3.5" /> : <Eye className="mr-2 h-3.5 w-3.5" />}
-            {showInactive ? "Masquer Inactifs / Validés" : "Voir Inactifs / Validés"}
+            {showInactive ? "Masquer Perdus/Inactifs" : "Voir Perdus/Inactifs"}
           </Button>
           
           <Button size="sm" onClick={() => { setEditingId(null); setFormData({ statut: "Nouveau", actif: true, provenance: "Site internet" }); setShowModal(true) }}>
@@ -264,20 +271,23 @@ export function ProspectsPipeline() {
         </div>
       </div>
 
+      {/* Colonnes Kanban */}
       <div className="flex gap-4 overflow-x-auto pb-4 h-full">
         {COLUMNS.map(column => {
           const columnProspects = displayedProspects.filter(p => (p.statut || "Nouveau") === column)
           
           return (
-            <div key={column} className="flex-shrink-0 w-80 flex flex-col gap-3 rounded-xl bg-muted/20 p-3 border border-border">
+            <div key={column} className={`flex-shrink-0 w-80 flex flex-col gap-3 rounded-xl p-3 border border-border ${column === 'Validé' ? 'bg-emerald-900/10 border-emerald-500/20' : 'bg-muted/20'}`}>
               <div className="flex items-center justify-between px-1">
-                <h3 className="font-semibold text-foreground text-sm">{column}</h3>
-                <Badge variant="secondary">{columnProspects.length}</Badge>
+                <h3 className={`font-semibold text-sm ${column === 'Validé' ? 'text-emerald-400' : 'text-foreground'}`}>{column}</h3>
+                <Badge variant="secondary" className={column === 'Validé' ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : ''}>
+                  {columnProspects.length}
+                </Badge>
               </div>
 
               <div className="flex flex-col gap-3 overflow-y-auto pr-1">
                 {columnProspects.map(p => (
-                  <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'}`}>
+                  <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
                     
                     <div className="flex justify-between items-start">
                       <div className="font-bold text-sm text-foreground leading-tight">{p.name}</div>
@@ -308,15 +318,17 @@ export function ProspectsPipeline() {
                       </span>
                       
                       <div className="flex items-center gap-1 shrink-0">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-6 w-6 p-0 text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10" 
-                          title="Valider et lancer la recherche d'emplacement"
-                          onClick={() => handlePasserEnRecherche(p)}
-                        >
-                          <Map className="h-3.5 w-3.5" />
-                        </Button>
+                        {p.statut !== "Validé" && p.actif !== false && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10" 
+                            title="Valider le candidat (Lancer la recherche)"
+                            onClick={() => handlePasserEnRecherche(p)}
+                          >
+                            <Map className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         
                         <select 
                           className="text-[10px] bg-muted/50 border border-border rounded p-1 outline-none text-muted-foreground w-16"
@@ -336,7 +348,7 @@ export function ProspectsPipeline() {
 
                     {p.actif === false && (
                       <div className="mt-1 bg-muted/50 text-[10px] text-center p-1 rounded text-muted-foreground">
-                        {p.statut === "En recherche" ? "✓ Candidat Validé (En recherche)" : "Prospect archivé (Inactif)"}
+                        Prospect archivé (Inactif)
                       </div>
                     )}
                   </div>
@@ -393,7 +405,6 @@ export function ProspectsPipeline() {
                       className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground"
                     >
                       {COLUMNS.map(c => <option key={c} value={c}>{c}</option>)}
-                      <option value="En recherche">En recherche (Validé)</option>
                     </select>
                 </div>
                 <div>
