@@ -43,7 +43,7 @@ export function ProspectsPipeline() {
     provenance: "Site internet"
   })
 
-  // === NOUVEAU : États Modal Mission / Rappel ===
+  // États Modal Mission / Rappel
   const [showMissionModal, setShowMissionModal] = useState(false)
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null)
   const [missionData, setMissionData] = useState({
@@ -142,26 +142,25 @@ export function ProspectsPipeline() {
     fetchProspects()
   }
 
-  // === NOUVEAU : Fonctions de création de Mission ===
+  // Ouverture du modal de création de mission
   const handleOpenMission = (p: Prospect) => {
     setSelectedProspect(p)
-    // On pré-remplit les informations utiles
     setMissionData({
       titre: `Relancer ${p.name}`,
       type: "Appel téléphonique",
-      echeance: new Date().toISOString().split('T')[0], // Date du jour par défaut
+      echeance: new Date().toISOString().split('T')[0],
       description: `Numéro : ${p.telephone || 'Non renseigné'} | Email : ${p.email || 'Non renseigné'}`
     })
     setShowMissionModal(true)
   }
 
+  // --- CORRECTION ICI : "title" au lieu de "titre" pour la BDD ---
   const handleSubmitMission = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedProspect) return
 
-    // Insertion dans la base de données (onglet Missions)
     const { error } = await supabase.from('missions').insert([{
-      titre: `[${missionData.type}] ${missionData.titre}`,
+      title: `[${missionData.type}] ${missionData.titre}`, // "title" correspond à la BDD
       description: missionData.description,
       echeance: missionData.echeance,
       prospect_id: selectedProspect.id,
@@ -346,10 +345,8 @@ export function ProspectsPipeline() {
                         {p.apport ? formatEuro(p.apport) : "-"}
                       </span>
                       
-                      {/* === ZONE DES BOUTONS D'ACTION === */}
                       <div className="flex items-center gap-1 shrink-0">
                         
-                        {/* Bouton Créer une Mission / Rappel */}
                         {p.actif !== false && (
                           <Button 
                             variant="ghost" 
@@ -405,7 +402,7 @@ export function ProspectsPipeline() {
         })}
       </div>
 
-      {/* === MODAL : AJOUTER UNE MISSION / UN RAPPEL === */}
+      {/* Modal Ajout Mission */}
       {showMissionModal && selectedProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl border-t-4 border-t-amber-500">
@@ -464,7 +461,7 @@ export function ProspectsPipeline() {
         </div>
       )}
 
-      {/* Modal Ajout/Modification classique (déjà existant) */}
+      {/* Modal Ajout/Modification classique */}
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
