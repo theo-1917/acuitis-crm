@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart } from "lucide-react"
+import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,7 +21,6 @@ type Prospect = {
   created_at: string
 }
 
-// L'ajout de la colonne "Validé" juste après RDV
 const COLUMNS = ["Nouveau", "Contacté", "RDV", "Validé", "Non qualifié", "Perdu"]
 
 const PROVENANCES = [
@@ -35,12 +34,23 @@ export function ProspectsPipeline() {
   const [loading, setLoading] = useState(true)
   const [showInactive, setShowInactive] = useState(false)
   
+  // États Modal Prospect
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [formData, setFormData] = useState<Partial<Prospect>>({
     statut: "Nouveau",
     actif: true,
     provenance: "Site internet"
+  })
+
+  // === NOUVEAU : États Modal Mission / Rappel ===
+  const [showMissionModal, setShowMissionModal] = useState(false)
+  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null)
+  const [missionData, setMissionData] = useState({
+    titre: "",
+    echeance: "",
+    description: "",
+    type: "Appel téléphonique"
   })
 
   const fetchProspects = async () => {
@@ -54,7 +64,6 @@ export function ProspectsPipeline() {
     fetchProspects()
   }, [])
 
-  // Action bouton manuel (archiver / désarchiver)
   const handleToggleActif = async (p: Prospect) => {
     const { error } = await supabase.from("prospects").update({ actif: !p.actif }).eq("id", p.id)
     if (!error) {
@@ -62,9 +71,7 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Changement de colonne avec le menu déroulant
   const handleChangeStatus = async (id: number, newStatus: string) => {
-    // Rend automatiquement inactif si c'est Perdu ou Non qualifié
     const isInactive = newStatus === "Non qualifié" || newStatus === "Perdu"
     const payload = { statut: newStatus, actif: !isInactive }
 
@@ -74,17 +81,14 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Action magique : Bouton Carte (Validation & Lancement Recherche)
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
 
-    // 1. Déplacement visuel immédiat dans la colonne "Validé" (Optimistic update)
     setProspects(current => current.map(prov => 
       prov.id === p.id ? { ...prov, statut: "Validé", actif: true } : prov
     ))
 
-    // 2. Création du projet de recherche (sans erreur type_zone)
     const { error: emplError } = await supabase.from("emplacements").insert([{
       prospect_id: p.id,
       villes_recherchees: villes,
@@ -95,14 +99,13 @@ export function ProspectsPipeline() {
 
     if (emplError) {
       alert("Erreur lors de la création de la recherche : " + emplError.message)
-      fetchProspects() // Rollback affichage
+      fetchProspects()
       return
     }
 
-    // 3. Sauvegarde du statut "Validé" en BDD
     const { error: prospectError } = await supabase.from("prospects").update({
       statut: "Validé",
-      actif: true // Reste visible dans le pipeline
+      actif: true
     }).eq("id", p.id)
 
     if (prospectError) {
@@ -139,7 +142,40 @@ export function ProspectsPipeline() {
     fetchProspects()
   }
 
-  // --- EXPORT 1 : TABLEAU BRUT ---
+  // === NOUVEAU : Fonctions de création de Mission ===
+  const handleOpenMission = (p: Prospect) => {
+    setSelectedProspect(p)
+    // On pré-remplit les informations utiles
+    setMissionData({
+      titre: `Relancer ${p.name}`,
+      type: "Appel téléphonique",
+      echeance: new Date().toISOString().split('T')[0], // Date du jour par défaut
+      description: `Numéro : ${p.telephone || 'Non renseigné'} | Email : ${p.email || 'Non renseigné'}`
+    })
+    setShowMissionModal(true)
+  }
+
+  const handleSubmitMission = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedProspect) return
+
+    // Insertion dans la base de données (onglet Missions)
+    const { error } = await supabase.from('missions').insert([{
+      titre: `[${missionData.type}] ${missionData.titre}`,
+      description: missionData.description,
+      echeance: missionData.echeance,
+      prospect_id: selectedProspect.id,
+      terminee: false
+    }])
+
+    if (!error) {
+      alert(`La mission pour ${selectedProspect.name} a bien été ajoutée au calendrier !`)
+      setShowMissionModal(false)
+    } else {
+      alert("Erreur lors de la création de la mission : " + error.message)
+    }
+  }
+
   const handleExportData = () => {
     const headers = ["ID", "Nom", "Ville", "Téléphone", "Email", "Apport", "Statut", "Provenance", "Actif", "Date de création"]
     const rows = prospects.map(p => [
@@ -165,14 +201,12 @@ export function ProspectsPipeline() {
     document.body.removeChild(link)
   }
 
-  // --- EXPORT 2 : RAPPORT KPI STATISTIQUES ---
   const handleExportKPI = () => {
     const total = prospects.length
     const valides = prospects.filter(p => p.statut === "Validé").length
     const perdus = prospects.filter(p => p.statut === "Non qualifié" || p.statut === "Perdu").length
     const enCours = total - valides - perdus
 
-    // Regroupement par Année et Mois
     const prospectsByMonthYear: Record<string, Prospect[]> = {}
     prospects.forEach(p => {
       const d = new Date(p.created_at)
@@ -184,7 +218,6 @@ export function ProspectsPipeline() {
 
     const sortedMonthKeys = Object.keys(prospectsByMonthYear).sort()
 
-    // Construction dynamique : Tableau Statuts x Mois
     const statusByMonthHeader = `Période (Mois/Année);${COLUMNS.join(";")};Total`
     const statusByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
@@ -194,7 +227,6 @@ export function ProspectsPipeline() {
       return `"${monthLabel}";${counts.join(';')};${list.length}`
     })
 
-    // Construction dynamique : Tableau Provenances x Mois
     const provenanceByMonthHeader = `Période (Mois/Année);${PROVENANCES.join(";")};Total`
     const provenanceByMonthLines = sortedMonthKeys.map(key => {
       const list = prospectsByMonthYear[key]
@@ -236,13 +268,11 @@ export function ProspectsPipeline() {
 
   if (loading) return <div className="p-4 text-muted-foreground">Chargement du pipeline...</div>
 
-  // N'affiche que les prospects Actifs (sauf si le bouton "Voir inactifs" est cliqué)
   const displayedProspects = showInactive ? prospects : prospects.filter(p => p.actif !== false)
 
   return (
     <div className="flex flex-col gap-6 h-[calc(100vh-140px)]">
       
-      {/* En-tête + Boutons */}
       <div className="flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-foreground">Pipeline Prospects</h2>
@@ -271,7 +301,6 @@ export function ProspectsPipeline() {
         </div>
       </div>
 
-      {/* Colonnes Kanban */}
       <div className="flex gap-4 overflow-x-auto pb-4 h-full">
         {COLUMNS.map(column => {
           const columnProspects = displayedProspects.filter(p => (p.statut || "Nouveau") === column)
@@ -317,7 +346,22 @@ export function ProspectsPipeline() {
                         {p.apport ? formatEuro(p.apport) : "-"}
                       </span>
                       
+                      {/* === ZONE DES BOUTONS D'ACTION === */}
                       <div className="flex items-center gap-1 shrink-0">
+                        
+                        {/* Bouton Créer une Mission / Rappel */}
+                        {p.actif !== false && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10" 
+                            title="Créer un rappel / une mission"
+                            onClick={() => handleOpenMission(p)}
+                          >
+                            <CalendarPlus className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+
                         {p.statut !== "Validé" && p.actif !== false && (
                           <Button 
                             variant="ghost" 
@@ -337,9 +381,11 @@ export function ProspectsPipeline() {
                         >
                           {COLUMNS.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
+
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground" onClick={() => handleEdit(p)}>
                           <Pencil className="h-3 w-3" />
                         </Button>
+                        
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10" onClick={() => handleDelete(p.id)}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -359,9 +405,68 @@ export function ProspectsPipeline() {
         })}
       </div>
 
-      {/* Modal Ajout/Modification */}
+      {/* === MODAL : AJOUTER UNE MISSION / UN RAPPEL === */}
+      {showMissionModal && selectedProspect && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl border-t-4 border-t-amber-500">
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
+              <div>
+                <h3 className="text-md font-bold text-foreground">Créer un rappel</h3>
+                <p className="text-xs text-muted-foreground">Pour le prospect : {selectedProspect.name}</p>
+              </div>
+              <button onClick={() => setShowMissionModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+            
+            <form onSubmit={handleSubmitMission} className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Type d'action</label>
+                <select 
+                  value={missionData.type}
+                  onChange={(e) => setMissionData({...missionData, type: e.target.value})}
+                  className="w-full text-sm bg-background border border-input rounded-md p-2 outline-none text-foreground"
+                >
+                  <option>Appel téléphonique</option>
+                  <option>Envoi d'email / de document</option>
+                  <option>Rendez-vous physique</option>
+                  <option>Visio / Teams</option>
+                  <option>Autre</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground block mb-1">Titre de la mission *</label>
+                  <Input required value={missionData.titre} onChange={e => setMissionData({...missionData, titre: e.target.value})} className="text-sm" />
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Date d'échéance (À faire pour le...) *</label>
+                <Input type="date" required value={missionData.echeance} onChange={e => setMissionData({...missionData, echeance: e.target.value})} className="text-sm w-full" />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Détails / Notes supplémentaires</label>
+                <textarea 
+                  rows={3}
+                  value={missionData.description} 
+                  onChange={e => setMissionData({...missionData, description: e.target.value})} 
+                  className="w-full text-sm bg-background border border-input rounded-md p-2 outline-none text-foreground resize-none" 
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4 border-t border-border">
+                <Button type="button" variant="outline" onClick={() => setShowMissionModal(false)}>Annuler</Button>
+                <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white">Ajouter au calendrier</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ajout/Modification classique (déjà existant) */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
             <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
               <h3 className="text-md font-semibold text-foreground">{editingId ? "Modifier le candidat" : "Nouveau candidat"}</h3>
