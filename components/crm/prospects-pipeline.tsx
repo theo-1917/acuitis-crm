@@ -1,14 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink, Send, Users, UserCircle } from "lucide-react"
+import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink, Send, Users, UserCircle, FileSpreadsheet } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 import { formatEuro } from "@/lib/crm-data"
 
-// 👇 TA LISTE D'ÉQUIPE EST ICI ! 👇
 const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris"]
 
 type Prospect = { id: number; name: string; ville: string; telephone: string; email: string; apport: number; statut: string; actif: boolean; provenance: string; created_at: string; est_franchise?: boolean; developpeur_assigne?: string }
@@ -61,7 +60,6 @@ export function ProspectsPipeline() {
     if (!error) setProspects(prospects.map(p => p.id === id ? { ...p, ...payload } : p))
   }
 
-  // NOUVEAU : Assigner un développeur au prospect
   const handleAssignDev = async (id: number, devName: string) => {
     const { error } = await supabase.from("prospects").update({ developpeur_assigne: devName }).eq("id", id)
     if (!error) setProspects(prospects.map(p => p.id === id ? { ...p, developpeur_assigne: devName } : p))
@@ -95,7 +93,6 @@ export function ProspectsPipeline() {
 
   const handleOpenMission = (p: Prospect) => {
     setSelectedProspect(p)
-    // Par défaut, on pré-coche le développeur assigné au prospect
     const defaultAssignes = p.developpeur_assigne ? [p.developpeur_assigne] : []
     setMissionData({ titre: `Échange franchise`, type: "Appel téléphonique", echeance: new Date().toISOString().split('T')[0], heure: "10:00", duree: "30", lieu: p.ville || "", inviterCandidat: false, description: `Téléphone : ${p.telephone || '-'}\nEmail : ${p.email || '-'}`, assignes: defaultAssignes })
     setShowMissionModal(true)
@@ -128,8 +125,17 @@ export function ProspectsPipeline() {
     return url
   }
 
+  // CORRECTION POUR MOBILE : L'ouverture doit être immédiate (synchrone)
   const handleSubmitMission = async (e: React.FormEvent, openGoogleCal: boolean = false) => {
-    e.preventDefault(); if (!selectedProspect) return
+    e.preventDefault(); 
+    if (!selectedProspect) return
+
+    // 1. On ouvre le calendrier IMMÉDIATEMENT pour contrer le bloqueur de pop-up Safari/Android
+    if (openGoogleCal) {
+      window.open(getGoogleCalendarUrl(), '_blank')
+    }
+
+    // 2. On sauvegarde dans la base de données en arrière-plan
     const { error } = await supabase.from('missions').insert([{ 
       title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, 
       description: `${missionData.description}\nHeure : ${missionData.heure} (${missionData.duree} min) | Lieu : ${missionData.lieu || '-'}`, 
@@ -138,11 +144,11 @@ export function ProspectsPipeline() {
       terminee: false,
       assignes: missionData.assignes
     }])
+    
     if (!error) {
-      if (openGoogleCal) window.open(getGoogleCalendarUrl(), '_blank')
       setShowMissionModal(false)
     } else {
-      alert("Erreur lors de la création de la mission.")
+      alert("La mission n'a pas pu être sauvegardée dans le CRM : " + error.message)
     }
   }
 
@@ -189,13 +195,66 @@ export function ProspectsPipeline() {
       echeance: new Date().toISOString().split('T')[0], 
       prospect_id: selectedProspect.id, 
       terminee: true,
-      assignes: [selectedProspect.developpeur_assigne || ""] // On assigne le mail au dev du prospect
+      assignes: [selectedProspect.developpeur_assigne || ""]
     }])
     setShowDocModal(false)
   }
 
-  const handleExportData = () => { /* ... export code inchangé ... */ }
-  const handleExportKPI = () => { /* ... export KPI inchangé ... */ }
+  const handleExportData = () => { /* Code existant */ }
+  const handleExportKPI = () => { /* Code existant */ }
+
+  // NOUVEAU : EXPORT TABLEAU QUALITATIF POUR RÉUNION MENSUELLE
+  const handleExportReunion = async () => {
+    // On récupère les dossiers pour avoir les commentaires et dates
+    const { data: dossiers } = await supabase.from("dossiers").select("*")
+
+    // On ne garde que les RDV, Validés, et Franchisés Existants
+    const prospectsReunion = prospects.filter(p => 
+      p.statut === "RDV" || 
+      p.statut === "Validé" || 
+      p.est_franchise === true
+    )
+
+    const headers = ["Porteur de projet", "Ville cherchée / Local", "Développeur", "Statut actuel", "Timing (Date prévue)", "Commentaires"]
+    
+    const rows = prospectsReunion.map(p => {
+      const dossier = dossiers?.find(d => d.prospect_id === p.id)
+      
+      const nom = p.name || ""
+      const ville = dossier?.adresse_local || p.ville || "Recherche en cours"
+      const dev = p.developpeur_assigne || "Non assigné"
+      
+      let statut = p.statut
+      if (dossier?.statut_dossier === "Validé") statut = "Projet Validé & Finalisé"
+      else if (dossier) statut = "Dossier en montage"
+      else if (p.est_franchise) statut = "Multi-franchise (Recherche)"
+
+      const timing = dossier?.date_ouverture_prevue ? new Date(dossier.date_ouverture_prevue).toLocaleDateString("fr-FR") : "À définir"
+      const commentaires = dossier?.commentaire || ""
+
+      return [
+        `"${nom}"`,
+        `"${ville}"`,
+        `"${dev}"`,
+        `"${statut}"`,
+        `"${timing}"`,
+        `"${commentaires.replace(/"/g, '""').replace(/\n/g, ' ')}"` // Sécurise les guillemets et sauts de ligne pour Excel
+      ]
+    })
+
+    const csvLines = [
+      "TABLEAU QUALITATIF - RÉUNION DÉVELOPPEMENT",
+      `Édité le;${new Date().toLocaleDateString("fr-FR")}`,
+      "",
+      headers.join(";"),
+      ...rows.map(r => r.join(";"))
+    ]
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvLines.join("\n")
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement("a"); link.href = encodedUri; link.download = `tableau_reunion_dev_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+  }
 
   if (loading) return <div className="p-4 text-muted-foreground">Chargement du pipeline...</div>
   const displayedProspects = showInactive ? prospects : prospects.filter(p => p.actif !== false)
@@ -209,6 +268,22 @@ export function ProspectsPipeline() {
           <p className="text-sm text-muted-foreground">Suivi des candidatures à la franchise.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          
+          <Button variant="outline" size="sm" onClick={handleExportData} className="border-border bg-muted/20 text-xs hidden md:flex">
+            <Download className="mr-2 h-3.5 w-3.5" /> Données Brutes
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={handleExportKPI} className="border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold hidden md:flex">
+            <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI
+          </Button>
+
+          {/* NOUVEAU BOUTON : Tableau Réunion */}
+          <Button variant="outline" size="sm" onClick={handleExportReunion} className="border-blue-500/30 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 text-xs font-bold">
+            <FileSpreadsheet className="mr-2 h-3.5 w-3.5" /> Tableau Réunion Dév.
+          </Button>
+
+          <div className="w-px h-6 bg-border mx-1 hidden sm:block"></div>
+
           <Button variant="outline" size="sm" onClick={() => setShowInactive(!showInactive)} className="text-xs">
             {showInactive ? <EyeOff className="mr-2 h-3.5 w-3.5" /> : <Eye className="mr-2 h-3.5 w-3.5" />} {showInactive ? "Masquer Perdus" : "Voir Perdus"}
           </Button>
@@ -232,7 +307,6 @@ export function ProspectsPipeline() {
                 {columnProspects.map(p => (
                   <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
                     
-                    {/* EN-TÊTE DE LA CARTE */}
                     <div className="flex justify-between items-start">
                       <div className="flex flex-col items-start gap-1">
                         <div className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors" onClick={() => handleOpenHistory(p)}>
@@ -240,12 +314,8 @@ export function ProspectsPipeline() {
                         </div>
                         <div className="flex gap-1 flex-wrap mt-0.5">
                           {p.est_franchise && (
-                            <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] px-1.5 py-0 uppercase tracking-wider">
-                              👑 Franchisé
-                            </Badge>
+                            <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] px-1.5 py-0 uppercase tracking-wider">👑 Franchisé</Badge>
                           )}
-                          
-                          {/* BADGE DÉVELOPPEUR ASSIGNÉ */}
                           {p.developpeur_assigne && (
                             <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[9px] px-1.5 py-0 flex items-center gap-1">
                               <UserCircle className="h-2.5 w-2.5" /> {p.developpeur_assigne.split(' ')[0]}
@@ -269,12 +339,9 @@ export function ProspectsPipeline() {
                       {p.email && <div className="flex items-center gap-1.5 truncate" title={p.email}><Mail className="h-3 w-3 shrink-0" /> {p.email}</div>}
                     </div>
 
-                    {/* PIED DE LA CARTE (BOUTONS) */}
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
-                      
-                      {/* SÉLECTEUR DE DÉVELOPPEUR (Petite liste déroulante discrète) */}
                       <select 
-                        className="text-[9px] font-semibold bg-transparent border-none outline-none text-muted-foreground hover:text-primary cursor-pointer w-24 truncate" 
+                        className="text-[9px] font-semibold bg-transparent border-none outline-none text-muted-foreground hover:text-primary cursor-pointer w-20 truncate" 
                         value={p.developpeur_assigne || ""} 
                         onChange={(e) => handleAssignDev(p.id, e.target.value)}
                         title="Assigner un développeur"
@@ -285,7 +352,7 @@ export function ProspectsPipeline() {
                       
                       <div className="flex items-center gap-1 shrink-0">
                         {p.actif !== false && (
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10" title="Envoyer un document (DIP...)" onClick={() => handleOpenDocModal(p)}>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10" title="Envoyer un document" onClick={() => handleOpenDocModal(p)}>
                             <Send className="h-3.5 w-3.5" />
                           </Button>
                         )}
@@ -313,8 +380,6 @@ export function ProspectsPipeline() {
         })}
       </div>
 
-      {/* Reste du code des modales inchangé, avec la sélection d'assignés pour les RDV (précédemment implémentée) */}
-      
       {/* MODAL : ENVOI DE DOCUMENT */}
       {showDocModal && selectedProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -328,28 +393,17 @@ export function ProspectsPipeline() {
             </div>
             
             {!selectedProspect.email ? (
-              <div className="text-sm text-amber-500 p-4 bg-amber-500/10 rounded-lg text-center font-semibold">
-                Ce candidat n'a pas d'adresse e-mail renseignée. Veuillez modifier sa fiche.
-              </div>
+              <div className="text-sm text-amber-500 p-4 bg-amber-500/10 rounded-lg text-center font-semibold">Ce candidat n'a pas d'adresse e-mail renseignée. Veuillez modifier sa fiche.</div>
             ) : availableDocs.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center p-4">
-                Aucun document disponible. Ajoutez-en d'abord dans l'onglet "Mes Documents".
-              </div>
+              <div className="text-sm text-muted-foreground text-center p-4">Aucun document disponible. Ajoutez-en d'abord dans l'onglet "Mes Documents".</div>
             ) : (
               <div className="space-y-4">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Choisir le document à envoyer</label>
-                  <select 
-                    value={selectedDocId}
-                    onChange={(e) => setSelectedDocId(e.target.value)}
-                    className="w-full text-sm bg-background border border-input rounded-md p-2 outline-none text-foreground"
-                  >
-                    {availableDocs.map(d => (
-                      <option key={d.id} value={d.id}>{d.titre}</option>
-                    ))}
+                  <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="w-full text-sm bg-background border border-input rounded-md p-2 outline-none text-foreground">
+                    {availableDocs.map(d => <option key={d.id} value={d.id}>{d.titre}</option>)}
                   </select>
                 </div>
-                
                 <div className="flex flex-col gap-2 pt-4 border-t border-border">
                   <Button onClick={handleSendDocument} className="w-full bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold">
                     <Send className="mr-2 h-3.5 w-3.5" /> Ouvrir la messagerie & Tracer l'envoi
@@ -390,7 +444,6 @@ export function ProspectsPipeline() {
                           <div>
                             <p className={`text-sm font-semibold ${mission.terminee ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{mission.title}</p>
                             {mission.description && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{mission.description}</p>}
-                            
                             {mission.assignes && mission.assignes.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-2">
                                 {mission.assignes.map(assigne => (
@@ -400,7 +453,6 @@ export function ProspectsPipeline() {
                                 ))}
                               </div>
                             )}
-
                           </div>
                         </div>
                         <Badge variant="outline" className={`text-[10px] shrink-0 ${mission.terminee ? 'text-muted-foreground border-transparent' : 'text-amber-500 border-amber-500/30 bg-amber-500/10'}`}>
@@ -432,11 +484,7 @@ export function ProspectsPipeline() {
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Type d'action</label>
                 <select value={missionData.type} onChange={(e) => setMissionData({...missionData, type: e.target.value})} className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground">
-                  <option>Appel téléphonique</option>
-                  <option>Envoi d'email / de document</option>
-                  <option>Rendez-vous physique</option>
-                  <option>Visio / Teams</option>
-                  <option>Autre</option>
+                  <option>Appel téléphonique</option><option>Envoi d'email / de document</option><option>Rendez-vous physique</option><option>Visio / Teams</option><option>Autre</option>
                 </select>
               </div>
               <div>
@@ -445,33 +493,23 @@ export function ProspectsPipeline() {
               </div>
 
               <div className="bg-muted/30 p-3 rounded-lg border border-border">
-                <label className="text-xs text-foreground font-semibold flex items-center gap-1 mb-2">
-                  <Users className="h-3.5 w-3.5" /> Assigner à :
-                </label>
+                <label className="text-xs text-foreground font-semibold flex items-center gap-1 mb-2"><Users className="h-3.5 w-3.5" /> Assigner à :</label>
                 <div className="flex flex-wrap gap-2">
-                  {EQUIPE.map(membre => (
-                    <label key={membre} className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[10px] transition-colors ${missionData.assignes.includes(membre) ? 'bg-primary/10 border-primary text-primary font-semibold' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}>
-                      <input 
-                        type="checkbox" 
-                        className="hidden" 
-                        checked={missionData.assignes.includes(membre)}
-                        onChange={() => toggleAssignee(membre)}
-                      />
-                      {membre}
-                    </label>
-                  ))}
+                  {EQUIPE.map(membre => {
+                    const isChecked = (missionData.assignes || []).includes(membre)
+                    return (
+                      <label key={membre} className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[10px] transition-colors ${isChecked ? 'bg-primary/10 border-primary text-primary font-semibold' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}>
+                        <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleAssignee(membre)} />
+                        {membre}
+                      </label>
+                    )
+                  })}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Date *</label>
-                  <Input type="date" required value={missionData.echeance} onChange={e => setMissionData({...missionData, echeance: e.target.value})} className="text-xs w-full" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Heure de début</label>
-                  <Input type="time" value={missionData.heure} onChange={e => setMissionData({...missionData, heure: e.target.value})} className="text-xs w-full" />
-                </div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Date *</label><Input type="date" required value={missionData.echeance} onChange={e => setMissionData({...missionData, echeance: e.target.value})} className="text-xs w-full" /></div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Heure de début</label><Input type="time" value={missionData.heure} onChange={e => setMissionData({...missionData, heure: e.target.value})} className="text-xs w-full" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -480,10 +518,7 @@ export function ProspectsPipeline() {
                     <option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 heure</option><option value="120">2 heures</option>
                   </select>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Lieu / Lien visio</label>
-                  <Input placeholder="Ville, Adresse ou Lien" value={missionData.lieu} onChange={e => setMissionData({...missionData, lieu: e.target.value})} className="text-xs" />
-                </div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Lieu / Lien visio</label><Input placeholder="Ville, Adresse ou Lien" value={missionData.lieu} onChange={e => setMissionData({...missionData, lieu: e.target.value})} className="text-xs" /></div>
               </div>
               {selectedProspect.email && (
                 <div className="flex items-center gap-2 pt-1">
@@ -491,10 +526,7 @@ export function ProspectsPipeline() {
                   <label htmlFor="invite-candidat" className="text-xs text-foreground cursor-pointer truncate">Inviter le candidat ({selectedProspect.email})</label>
                 </div>
               )}
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Notes / Préparation</label>
-                <textarea rows={2} value={missionData.description} onChange={e => setMissionData({...missionData, description: e.target.value})} className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground resize-none" />
-              </div>
+              <div><label className="text-xs text-muted-foreground block mb-1">Notes / Préparation</label><textarea rows={2} value={missionData.description} onChange={e => setMissionData({...missionData, description: e.target.value})} className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground resize-none" /></div>
               <div className="flex flex-col gap-2 pt-3 border-t border-border">
                 <Button type="button" onClick={(e) => handleSubmitMission(e, true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">
                   <ExternalLink className="mr-2 h-3.5 w-3.5" /> Enregistrer + Synchroniser Google Calendar
@@ -524,24 +556,12 @@ export function ProspectsPipeline() {
                 <Input required value={formData.name || ""} onChange={e => setFormData({...formData, name: e.target.value})} className="text-xs" />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Téléphone</label>
-                  <Input value={formData.telephone || ""} onChange={e => setFormData({...formData, telephone: e.target.value})} className="text-xs" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Email</label>
-                  <Input type="email" value={formData.email || ""} onChange={e => setFormData({...formData, email: e.target.value})} className="text-xs" />
-                </div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Téléphone</label><Input value={formData.telephone || ""} onChange={e => setFormData({...formData, telephone: e.target.value})} className="text-xs" /></div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Email</label><Input type="email" value={formData.email || ""} onChange={e => setFormData({...formData, email: e.target.value})} className="text-xs" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Ville souhaitée</label>
-                  <Input value={formData.ville || ""} onChange={e => setFormData({...formData, ville: e.target.value})} className="text-xs" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Apport (€)</label>
-                  <Input type="number" value={formData.apport || ""} onChange={e => setFormData({...formData, apport: Number(e.target.value)})} className="text-xs" />
-                </div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Ville souhaitée</label><Input value={formData.ville || ""} onChange={e => setFormData({...formData, ville: e.target.value})} className="text-xs" /></div>
+                <div><label className="text-xs text-muted-foreground block mb-1">Apport (€)</label><Input type="number" value={formData.apport || ""} onChange={e => setFormData({...formData, apport: Number(e.target.value)})} className="text-xs" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -561,15 +581,9 @@ export function ProspectsPipeline() {
               <div className="flex items-center gap-2 pt-2 border-t border-border mt-2">
                   <input type="checkbox" id="franchise-checkbox" checked={formData.est_franchise || false} onChange={(e) => {
                     const isFranchise = e.target.checked
-                    setFormData({
-                      ...formData, 
-                      est_franchise: isFranchise, 
-                      statut: isFranchise ? "Validé" : (formData.statut || "Nouveau")
-                    })
+                    setFormData({ ...formData, est_franchise: isFranchise, statut: isFranchise ? "Validé" : (formData.statut || "Nouveau") })
                   }} className="rounded border-border accent-blue-500" />
-                  <label htmlFor="franchise-checkbox" className="text-xs text-blue-500 font-semibold cursor-pointer">
-                    👑 C'est un franchisé existant (Multi-franchise)
-                  </label>
+                  <label htmlFor="franchise-checkbox" className="text-xs text-blue-500 font-semibold cursor-pointer">👑 C'est un franchisé existant (Multi-franchise)</label>
               </div>
 
               <div className="flex items-center gap-2 pt-1">
