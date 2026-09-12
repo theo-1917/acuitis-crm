@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus } from "lucide-react"
+import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,6 +19,16 @@ type Prospect = {
   actif: boolean
   provenance: string
   created_at: string
+}
+
+// Nouveau type pour gérer l'historique des missions
+type Mission = {
+  id: number
+  title: string
+  description: string
+  echeance: string
+  terminee: boolean
+  prospect_id: number
 }
 
 const COLUMNS = ["Nouveau", "Contacté", "RDV", "Validé", "Non qualifié", "Perdu"]
@@ -52,6 +62,12 @@ export function ProspectsPipeline() {
     description: "",
     type: "Appel téléphonique"
   })
+
+  // === NOUVEAU : États Modal Historique ===
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [historyProspect, setHistoryProspect] = useState<Prospect | null>(null)
+  const [prospectMissions, setProspectMissions] = useState<Mission[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   const fetchProspects = async () => {
     setLoading(true)
@@ -142,11 +158,10 @@ export function ProspectsPipeline() {
     fetchProspects()
   }
 
-  // Ouverture du modal de création de mission
   const handleOpenMission = (p: Prospect) => {
     setSelectedProspect(p)
     setMissionData({
-      titre: `Relancer ${p.name}`,
+      titre: `Relancer`, // On a simplifié le titre ici car le nom du prospect sera ajouté automatiquement
       type: "Appel téléphonique",
       echeance: new Date().toISOString().split('T')[0],
       description: `Numéro : ${p.telephone || 'Non renseigné'} | Email : ${p.email || 'Non renseigné'}`
@@ -154,13 +169,13 @@ export function ProspectsPipeline() {
     setShowMissionModal(true)
   }
 
-  // --- CORRECTION ICI : "title" au lieu de "titre" pour la BDD ---
+  // --- CORRECTION : On intègre directement le nom du candidat dans le titre de la mission ---
   const handleSubmitMission = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedProspect) return
 
     const { error } = await supabase.from('missions').insert([{
-      title: `[${missionData.type}] ${missionData.titre}`, // "title" correspond à la BDD
+      title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, // <-- AJOUT DU NOM ICI
       description: missionData.description,
       echeance: missionData.echeance,
       prospect_id: selectedProspect.id,
@@ -172,6 +187,33 @@ export function ProspectsPipeline() {
       setShowMissionModal(false)
     } else {
       alert("Erreur lors de la création de la mission : " + error.message)
+    }
+  }
+
+  // === NOUVEAU : Gestion de l'historique ===
+  const handleOpenHistory = async (p: Prospect) => {
+    setHistoryProspect(p)
+    setShowHistoryModal(true)
+    setLoadingHistory(true)
+    
+    // Récupération de toutes les missions liées à ce prospect
+    const { data, error } = await supabase
+      .from('missions')
+      .select('*')
+      .eq('prospect_id', p.id)
+      .order('echeance', { ascending: false }) // Les plus récentes en premier
+
+    if (!error && data) {
+      setProspectMissions(data)
+    }
+    setLoadingHistory(false)
+  }
+
+  // Permet de cocher/décocher une mission directement depuis l'historique
+  const handleToggleMission = async (missionId: number, currentStatus: boolean) => {
+    const { error } = await supabase.from('missions').update({ terminee: !currentStatus }).eq('id', missionId)
+    if (!error) {
+      setProspectMissions(prev => prev.map(m => m.id === missionId ? { ...m, terminee: !currentStatus } : m))
     }
   }
 
@@ -318,7 +360,14 @@ export function ProspectsPipeline() {
                   <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
                     
                     <div className="flex justify-between items-start">
-                      <div className="font-bold text-sm text-foreground leading-tight">{p.name}</div>
+                      {/* LE NOM EST MAINTENANT CLIQUABLE POUR OUVRIR L'HISTORIQUE */}
+                      <div 
+                        className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors"
+                        title="Voir le dossier complet et l'historique"
+                        onClick={() => handleOpenHistory(p)}
+                      >
+                        {p.name}
+                      </div>
                       <div className="flex items-center gap-1">
                         <button 
                           title={p.actif === false ? "Réactiver le prospect" : "Archiver le prospect"} 
@@ -358,6 +407,17 @@ export function ProspectsPipeline() {
                             <CalendarPlus className="h-3.5 w-3.5" />
                           </Button>
                         )}
+
+                        {/* Bouton Historique direct sur la carte */}
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10" 
+                          title="Voir l'historique et les missions"
+                          onClick={() => handleOpenHistory(p)}
+                        >
+                          <ClipboardList className="h-3.5 w-3.5" />
+                        </Button>
 
                         {p.statut !== "Validé" && p.actif !== false && (
                           <Button 
@@ -401,6 +461,58 @@ export function ProspectsPipeline() {
           )
         })}
       </div>
+
+      {/* === MODAL : DOSSIER ET HISTORIQUE === */}
+      {showHistoryModal && historyProspect && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-4 shrink-0">
+              <div>
+                <h3 className="text-md font-bold text-foreground">Dossier : {historyProspect.name}</h3>
+                <p className="text-xs text-muted-foreground">Historique et missions associées</p>
+              </div>
+              <button onClick={() => setShowHistoryModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+            
+            <div className="overflow-y-auto pr-2 flex-1">
+              {loadingHistory ? (
+                <div className="text-center text-sm text-muted-foreground py-8">Chargement de l'historique...</div>
+              ) : prospectMissions.length === 0 ? (
+                <div className="text-center text-sm text-muted-foreground py-8">Aucune mission ou action trouvée pour ce candidat.</div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {prospectMissions.map(mission => (
+                    <div key={mission.id} className={`p-3 rounded-lg border ${mission.terminee ? 'bg-muted/30 border-dashed border-border' : 'bg-background border-border shadow-sm'}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-3">
+                          <button 
+                            onClick={() => handleToggleMission(mission.id, mission.terminee)}
+                            className={`mt-0.5 shrink-0 transition-colors ${mission.terminee ? 'text-emerald-500' : 'text-muted-foreground hover:text-primary'}`}
+                            title={mission.terminee ? "Marquer comme à faire" : "Marquer comme terminée"}
+                          >
+                            {mission.terminee ? <CheckCircle className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+                          </button>
+                          <div>
+                            <p className={`text-sm font-semibold ${mission.terminee ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
+                              {mission.title}
+                            </p>
+                            {mission.description && (
+                              <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{mission.description}</p>
+                            )}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={`text-[10px] shrink-0 ${mission.terminee ? 'text-muted-foreground border-transparent' : 'text-amber-500 border-amber-500/30 bg-amber-500/10'}`}>
+                          {new Date(mission.echeance).toLocaleDateString('fr-FR')}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Ajout Mission */}
       {showMissionModal && selectedProspect && (
