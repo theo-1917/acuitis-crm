@@ -15,25 +15,19 @@ const PROVENANCES = ["Prospection téléphonique", "Site internet", "Contact SIL
 export function Header() {
   const router = useRouter()
   
-  // États utilisateur
   const [userInitials, setUserInitials] = useState("..")
   const [userEmail, setUserEmail] = useState("")
 
-  // États recherche
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
 
-  // États Cloche
   const [urgentCount, setUrgentCount] = useState(0)
-
-  // États Menus & Backup
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [isBackingUp, setIsBackingUp] = useState(false)
 
-  // Modal d'ajout rapide
   const [showAddModal, setShowAddModal] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
@@ -69,9 +63,7 @@ export function Header() {
           }).length
           setUrgentCount(count)
         }
-      } catch (err) {
-        console.error("Erreur missions :", err)
-      }
+      } catch (err) { console.error("Erreur missions :", err) }
     }
     fetchUrgentMissions()
   }, [])
@@ -115,11 +107,13 @@ export function Header() {
     router.refresh()
   }
 
-  // === FONCTION DE BACKUP COMPLET (Dossier ZIP) ===
+  // === FONCTION DE BACKUP COMPLET (Données + Fichiers) ===
   const handleBackup = async () => {
     setIsBackingUp(true)
     try {
-      // 1. Aspiration de TOUTES les tables de la base de données
+      const zip = new JSZip()
+
+      // 1. Aspiration des tables de la base de données
       const [prospectsReq, dossiersReq, locauxReq, missionsReq, emplacementsReq] = await Promise.all([
         supabase.from('prospects').select('*'),
         supabase.from('dossiers').select('*'),
@@ -128,9 +122,6 @@ export function Header() {
         supabase.from('emplacements').select('*'),
       ])
 
-      const zip = new JSZip()
-
-      // Convertisseur en format Excel CSV
       const toCSV = (data: any[]) => {
         if (!data || data.length === 0) return ""
         const headers = Object.keys(data[0])
@@ -142,7 +133,7 @@ export function Header() {
         return [headers.join(";"), ...rows].join("\n")
       }
 
-      // 2. Structuration du dossier compressé
+      // 2. Organisation des données SQL dans le ZIP
       const f1 = zip.folder("1_Prospects_et_Candidats")
       f1?.file("tous_les_prospects.csv", "\uFEFF" + toCSV(prospectsReq.data || []))
 
@@ -156,7 +147,6 @@ export function Header() {
       const f4 = zip.folder("4_Missions")
       f4?.file("missions_et_rappels.csv", "\uFEFF" + toCSV(missionsReq.data || []))
 
-      // 3. Ajout de la sauvegarde "Developpeur" (JSON pur)
       zip.file("sauvegarde_integrale_bdd.json", JSON.stringify({
         prospects: prospectsReq.data,
         dossiers: dossiersReq.data,
@@ -165,11 +155,36 @@ export function Header() {
         emplacements: emplacementsReq.data
       }, null, 2))
 
-      // 4. Génération et téléchargement
+      // 3. ASPIRATION DES FICHIERS (BUCKETS STORAGE)
+      // Modifie ces noms si tes buckets dans Supabase s'appellent autrement
+      const BUCKETS_A_SAUVEGARDER = ["documents", "fichiers", "locaux", "dossiers"]
+      const f5 = zip.folder("5_Fichiers_et_Pieces_Jointes")
+
+      for (const bucket of BUCKETS_A_SAUVEGARDER) {
+        // Liste tous les fichiers dans le bucket
+        const { data: files } = await supabase.storage.from(bucket).list()
+        
+        if (files && files.length > 0) {
+          const bucketFolder = f5?.folder(bucket) // Crée un sous-dossier par bucket
+          
+          for (const file of files) {
+            // On ignore les dossiers vides fantômes de Supabase
+            if (file.name === '.emptyFolderPlaceholder' || !file.id) continue;
+            
+            // Télécharge le fichier physique sous forme de "Blob"
+            const { data: fileData } = await supabase.storage.from(bucket).download(file.name)
+            if (fileData) {
+              bucketFolder?.file(file.name, fileData)
+            }
+          }
+        }
+      }
+
+      // 4. Génération du fichier ZIP final
       const content = await zip.generateAsync({ type: "blob" })
       const link = document.createElement('a')
       link.href = URL.createObjectURL(content)
-      link.download = `Backup_Acuitis_CRM_${new Date().toISOString().slice(0, 10)}.zip`
+      link.download = `Backup_Acuitis_CRM_Complet_${new Date().toISOString().slice(0, 10)}.zip`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -283,7 +298,7 @@ export function Header() {
                   className="w-full flex items-center px-3 py-2.5 text-sm text-foreground hover:bg-muted/50 rounded-md transition text-left cursor-pointer disabled:opacity-50"
                 >
                   {isBackingUp ? <Loader2 className="mr-2 h-4 w-4 animate-spin text-primary" /> : <DownloadCloud className="mr-2 h-4 w-4 text-primary" />}
-                  {isBackingUp ? "Création du dossier ZIP..." : "Sauvegarder tout le CRM"}
+                  {isBackingUp ? "Téléchargement en cours..." : "Sauvegarder tout le CRM"}
                 </button>
                 
                 <div className="h-px bg-border my-1 mx-2"></div>
