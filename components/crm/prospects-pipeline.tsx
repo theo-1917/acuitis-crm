@@ -1,15 +1,18 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink, Send } from "lucide-react"
+import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink, Send, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 import { formatEuro } from "@/lib/crm-data"
 
+// 👇 C'est ici que tu pourras modifier ton équipe facilement à l'avenir !
+const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris"]
+
 type Prospect = { id: number; name: string; ville: string; telephone: string; email: string; apport: number; statut: string; actif: boolean; provenance: string; created_at: string; est_franchise?: boolean }
-type Mission = { id: number; title: string; description: string; echeance: string; terminee: boolean; prospect_id: number }
+type Mission = { id: number; title: string; description: string; echeance: string; terminee: boolean; prospect_id: number; assignes: string[] }
 type DocumentModel = { id: number; titre: string; url_fichier: string; modele_email: string }
 
 const COLUMNS = ["Nouveau", "Contacté", "RDV", "Validé", "Non qualifié", "Perdu"]
@@ -26,7 +29,7 @@ export function ProspectsPipeline() {
 
   const [showMissionModal, setShowMissionModal] = useState(false)
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null)
-  const [missionData, setMissionData] = useState({ titre: "", echeance: "", heure: "10:00", duree: "30", lieu: "", inviterCandidat: false, description: "", type: "Appel téléphonique" })
+  const [missionData, setMissionData] = useState({ titre: "", echeance: "", heure: "10:00", duree: "30", lieu: "", inviterCandidat: false, description: "", type: "Appel téléphonique", assignes: [] as string[] })
 
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [historyProspect, setHistoryProspect] = useState<Prospect | null>(null)
@@ -86,8 +89,17 @@ export function ProspectsPipeline() {
 
   const handleOpenMission = (p: Prospect) => {
     setSelectedProspect(p)
-    setMissionData({ titre: `Échange franchise`, type: "Appel téléphonique", echeance: new Date().toISOString().split('T')[0], heure: "10:00", duree: "30", lieu: p.ville || "", inviterCandidat: false, description: `Téléphone : ${p.telephone || '-'}\nEmail : ${p.email || '-'}` })
+    setMissionData({ titre: `Échange franchise`, type: "Appel téléphonique", echeance: new Date().toISOString().split('T')[0], heure: "10:00", duree: "30", lieu: p.ville || "", inviterCandidat: false, description: `Téléphone : ${p.telephone || '-'}\nEmail : ${p.email || '-'}`, assignes: [] })
     setShowMissionModal(true)
+  }
+
+  const toggleAssignee = (name: string) => {
+    setMissionData(prev => ({
+      ...prev,
+      assignes: prev.assignes.includes(name) 
+        ? prev.assignes.filter(n => n !== name) 
+        : [...prev.assignes, name]
+    }))
   }
 
   const getGoogleCalendarUrl = () => {
@@ -98,7 +110,11 @@ export function ProspectsPipeline() {
     const end = new Date(start.getTime() + Number(missionData.duree || 30) * 60000)
     const formatGCalDate = (d: Date) => d.toISOString().replace(/-|:|\.\d\d\d/g, "")
     const fullTitle = `[${missionData.type}] ${missionData.titre} - ${selectedProspect.name}`
-    const details = `Candidat : ${selectedProspect.name}\nTéléphone : ${selectedProspect.telephone || '-'}\nEmail : ${selectedProspect.email || '-'}\n\nNotes :\n${missionData.description}`
+    
+    let details = `Candidat : ${selectedProspect.name}\nTéléphone : ${selectedProspect.telephone || '-'}\nEmail : ${selectedProspect.email || '-'}\n\n`
+    if (missionData.assignes.length > 0) details += `Assigné à : ${missionData.assignes.join(', ')}\n\n`
+    details += `Notes :\n${missionData.description}`
+
     let url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(fullTitle)}&dates=${formatGCalDate(start)}/${formatGCalDate(end)}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(missionData.lieu || "")}`
     if (missionData.inviterCandidat && selectedProspect.email) url += `&add=${encodeURIComponent(selectedProspect.email)}`
     return url
@@ -106,10 +122,19 @@ export function ProspectsPipeline() {
 
   const handleSubmitMission = async (e: React.FormEvent, openGoogleCal: boolean = false) => {
     e.preventDefault(); if (!selectedProspect) return
-    const { error } = await supabase.from('missions').insert([{ title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, description: `${missionData.description}\nHeure : ${missionData.heure} (${missionData.duree} min) | Lieu : ${missionData.lieu || '-'}`, echeance: missionData.echeance, prospect_id: selectedProspect.id, terminee: false }])
+    const { error } = await supabase.from('missions').insert([{ 
+      title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, 
+      description: `${missionData.description}\nHeure : ${missionData.heure} (${missionData.duree} min) | Lieu : ${missionData.lieu || '-'}`, 
+      echeance: missionData.echeance, 
+      prospect_id: selectedProspect.id, 
+      terminee: false,
+      assignes: missionData.assignes
+    }])
     if (!error) {
       if (openGoogleCal) window.open(getGoogleCalendarUrl(), '_blank')
       setShowMissionModal(false)
+    } else {
+      alert("Erreur lors de la création de la mission.")
     }
   }
 
@@ -155,7 +180,8 @@ export function ProspectsPipeline() {
       description: `Généré automatiquement par le CRM vers l'adresse ${selectedProspect.email || "non renseignée"}.`,
       echeance: new Date().toISOString().split('T')[0], 
       prospect_id: selectedProspect.id, 
-      terminee: true 
+      terminee: true,
+      assignes: []
     }])
     setShowDocModal(false)
   }
@@ -172,7 +198,6 @@ export function ProspectsPipeline() {
   }
 
   const handleExportKPI = () => {
-    // SÉPARATION DES KPI : EXTERNES (Acquisition) vs INTERNES (Franchisés existants)
     const prospectsExternes = prospects.filter(p => !p.est_franchise)
     const franchisesExistants = prospects.filter(p => p.est_franchise)
 
@@ -181,7 +206,6 @@ export function ProspectsPipeline() {
     const perdus = prospectsExternes.filter(p => p.statut === "Non qualifié" || p.statut === "Perdu").length
     const enCours = total - valides - perdus
 
-    // Stats par mois (Uniquement sur l'externe pour garder la pureté de la donnée)
     const prospectsByMonthYear: Record<string, Prospect[]> = {}
     prospectsExternes.forEach(p => {
       const d = new Date(p.created_at)
@@ -274,7 +298,6 @@ export function ProspectsPipeline() {
                   <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
                     <div className="flex justify-between items-start">
                       
-                      {/* NOM + BADGE FRANCHISÉ */}
                       <div className="flex flex-col items-start gap-1">
                         <div className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors" onClick={() => handleOpenHistory(p)}>
                           {p.name}
@@ -348,7 +371,7 @@ export function ProspectsPipeline() {
             
             {!selectedProspect.email ? (
               <div className="text-sm text-amber-500 p-4 bg-amber-500/10 rounded-lg text-center font-semibold">
-                Ce candidat n'a pas d'adresse e-mail renseignée. Veuillez modifier sa fiche pour ajouter un email.
+                Ce candidat n'a pas d'adresse e-mail renseignée. Veuillez modifier sa fiche.
               </div>
             ) : availableDocs.length === 0 ? (
               <div className="text-sm text-muted-foreground text-center p-4">
@@ -409,6 +432,18 @@ export function ProspectsPipeline() {
                           <div>
                             <p className={`text-sm font-semibold ${mission.terminee ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{mission.title}</p>
                             {mission.description && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{mission.description}</p>}
+                            
+                            {/* AFFICHAGE DES ASSIGNÉS DANS L'HISTORIQUE */}
+                            {mission.assignes && mission.assignes.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {mission.assignes.map(assigne => (
+                                  <Badge key={assigne} variant="secondary" className="text-[9px] bg-primary/10 text-primary border-none px-1.5 py-0 rounded-sm">
+                                    <Users className="h-2.5 w-2.5 mr-1" /> {assigne}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+
                           </div>
                         </div>
                         <Badge variant="outline" className={`text-[10px] shrink-0 ${mission.terminee ? 'text-muted-foreground border-transparent' : 'text-amber-500 border-amber-500/30 bg-amber-500/10'}`}>
@@ -451,6 +486,27 @@ export function ProspectsPipeline() {
                 <label className="text-xs text-muted-foreground block mb-1">Objet de l'action *</label>
                 <Input required value={missionData.titre} onChange={e => setMissionData({...missionData, titre: e.target.value})} className="text-xs" />
               </div>
+
+              {/* NOUVEAU : SÉLECTION DES COLLABORATEURS (ASSIGNÉS) */}
+              <div className="bg-muted/30 p-3 rounded-lg border border-border">
+                <label className="text-xs text-foreground font-semibold flex items-center gap-1 mb-2">
+                  <Users className="h-3.5 w-3.5" /> Assigner à :
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {EQUIPE.map(membre => (
+                    <label key={membre} className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[10px] transition-colors ${missionData.assignes.includes(membre) ? 'bg-primary/10 border-primary text-primary font-semibold' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}>
+                      <input 
+                        type="checkbox" 
+                        className="hidden" 
+                        checked={missionData.assignes.includes(membre)}
+                        onChange={() => toggleAssignee(membre)}
+                      />
+                      {membre}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Date *</label>
@@ -546,14 +602,13 @@ export function ProspectsPipeline() {
                 </div>
               </div>
 
-              {/* NOUVEAU : CASE FRANCHISÉ EXISTANT */}
               <div className="flex items-center gap-2 pt-2 border-t border-border mt-2">
                   <input type="checkbox" id="franchise-checkbox" checked={formData.est_franchise || false} onChange={(e) => {
                     const isFranchise = e.target.checked
                     setFormData({
                       ...formData, 
                       est_franchise: isFranchise, 
-                      statut: isFranchise ? "Validé" : (formData.statut || "Nouveau") // Passe en Validé automatiquement
+                      statut: isFranchise ? "Validé" : (formData.statut || "Nouveau")
                     })
                   }} className="rounded border-border accent-blue-500" />
                   <label htmlFor="franchise-checkbox" className="text-xs text-blue-500 font-semibold cursor-pointer">
