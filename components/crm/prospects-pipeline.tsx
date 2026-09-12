@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle } from "lucide-react"
+import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,7 +21,6 @@ type Prospect = {
   created_at: string
 }
 
-// Nouveau type pour gérer l'historique des missions
 type Mission = {
   id: number
   title: string
@@ -53,17 +52,21 @@ export function ProspectsPipeline() {
     provenance: "Site internet"
   })
 
-  // États Modal Mission / Rappel
+  // États Modal Mission / Rappel avec infos complètes Google Calendar
   const [showMissionModal, setShowMissionModal] = useState(false)
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null)
   const [missionData, setMissionData] = useState({
     titre: "",
     echeance: "",
+    heure: "10:00",
+    duree: "30",
+    lieu: "",
+    inviterCandidat: false,
     description: "",
     type: "Appel téléphonique"
   })
 
-  // === NOUVEAU : États Modal Historique ===
+  // États Modal Historique
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [historyProspect, setHistoryProspect] = useState<Prospect | null>(null)
   const [prospectMissions, setProspectMissions] = useState<Mission[]>([])
@@ -161,47 +164,80 @@ export function ProspectsPipeline() {
   const handleOpenMission = (p: Prospect) => {
     setSelectedProspect(p)
     setMissionData({
-      titre: `Relancer`, // On a simplifié le titre ici car le nom du prospect sera ajouté automatiquement
+      titre: `Échange franchise`,
       type: "Appel téléphonique",
       echeance: new Date().toISOString().split('T')[0],
-      description: `Numéro : ${p.telephone || 'Non renseigné'} | Email : ${p.email || 'Non renseigné'}`
+      heure: "10:00",
+      duree: "30",
+      lieu: p.ville || "",
+      inviterCandidat: false,
+      description: `Téléphone : ${p.telephone || 'Non renseigné'}\nEmail : ${p.email || 'Non renseigné'}`
     })
     setShowMissionModal(true)
   }
 
-  // --- CORRECTION : On intègre directement le nom du candidat dans le titre de la mission ---
-  const handleSubmitMission = async (e: React.FormEvent) => {
+  // Générateur de lien d'évènement Google Calendar
+  const getGoogleCalendarUrl = () => {
+    if (!selectedProspect || !missionData.echeance) return "#"
+
+    const [year, month, day] = missionData.echeance.split('-')
+    const [hours, minutes] = (missionData.heure || "10:00").split(':')
+
+    const start = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes))
+    const end = new Date(start.getTime() + Number(missionData.duree || 30) * 60000)
+
+    const formatGCalDate = (d: Date) => d.toISOString().replace(/-|:|\.\d\d\d/g, "")
+
+    const fullTitle = `[${missionData.type}] ${missionData.titre} - ${selectedProspect.name}`
+    const details = `Candidat : ${selectedProspect.name}\nTéléphone : ${selectedProspect.telephone || 'Non renseigné'}\nEmail : ${selectedProspect.email || 'Non renseigné'}\nVille : ${selectedProspect.ville || 'Non renseignée'}\n\nNotes :\n${missionData.description || 'Aucune note'}`
+
+    let url = `https://calendar.google.com/calendar/render?action=TEMPLATE`
+      + `&text=${encodeURIComponent(fullTitle)}`
+      + `&dates=${formatGCalDate(start)}/${formatGCalDate(end)}`
+      + `&details=${encodeURIComponent(details)}`
+      + `&location=${encodeURIComponent(missionData.lieu || selectedProspect.ville || "")}`
+
+    if (missionData.inviterCandidat && selectedProspect.email) {
+      url += `&add=${encodeURIComponent(selectedProspect.email)}`
+    }
+
+    return url
+  }
+
+  const handleSubmitMission = async (e: React.FormEvent, openGoogleCal: boolean = false) => {
     e.preventDefault()
     if (!selectedProspect) return
 
     const { error } = await supabase.from('missions').insert([{
-      title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, // <-- AJOUT DU NOM ICI
-      description: missionData.description,
+      title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`,
+      description: `${missionData.description}\nHeure : ${missionData.heure} (${missionData.duree} min) | Lieu : ${missionData.lieu || 'Non spécifié'}`,
       echeance: missionData.echeance,
       prospect_id: selectedProspect.id,
       terminee: false
     }])
 
     if (!error) {
-      alert(`La mission pour ${selectedProspect.name} a bien été ajoutée au calendrier !`)
+      if (openGoogleCal) {
+        window.open(getGoogleCalendarUrl(), '_blank')
+      } else {
+        alert(`La mission pour ${selectedProspect.name} a bien été ajoutée au CRM !`)
+      }
       setShowMissionModal(false)
     } else {
       alert("Erreur lors de la création de la mission : " + error.message)
     }
   }
 
-  // === NOUVEAU : Gestion de l'historique ===
   const handleOpenHistory = async (p: Prospect) => {
     setHistoryProspect(p)
     setShowHistoryModal(true)
     setLoadingHistory(true)
     
-    // Récupération de toutes les missions liées à ce prospect
     const { data, error } = await supabase
       .from('missions')
       .select('*')
       .eq('prospect_id', p.id)
-      .order('echeance', { ascending: false }) // Les plus récentes en premier
+      .order('echeance', { ascending: false })
 
     if (!error && data) {
       setProspectMissions(data)
@@ -209,7 +245,6 @@ export function ProspectsPipeline() {
     setLoadingHistory(false)
   }
 
-  // Permet de cocher/décocher une mission directement depuis l'historique
   const handleToggleMission = async (missionId: number, currentStatus: boolean) => {
     const { error } = await supabase.from('missions').update({ terminee: !currentStatus }).eq('id', missionId)
     if (!error) {
@@ -360,7 +395,6 @@ export function ProspectsPipeline() {
                   <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
                     
                     <div className="flex justify-between items-start">
-                      {/* LE NOM EST MAINTENANT CLIQUABLE POUR OUVRIR L'HISTORIQUE */}
                       <div 
                         className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors"
                         title="Voir le dossier complet et l'historique"
@@ -401,14 +435,13 @@ export function ProspectsPipeline() {
                             variant="ghost" 
                             size="sm" 
                             className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10" 
-                            title="Créer un rappel / une mission"
+                            title="Créer un rappel / un événement"
                             onClick={() => handleOpenMission(p)}
                           >
                             <CalendarPlus className="h-3.5 w-3.5" />
                           </Button>
                         )}
 
-                        {/* Bouton Historique direct sur la carte */}
                         <Button 
                           variant="ghost" 
                           size="sm" 
@@ -462,7 +495,7 @@ export function ProspectsPipeline() {
         })}
       </div>
 
-      {/* === MODAL : DOSSIER ET HISTORIQUE === */}
+      {/* MODAL HISTORIQUE */}
       {showHistoryModal && historyProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl flex flex-col max-h-[80vh]">
@@ -514,25 +547,25 @@ export function ProspectsPipeline() {
         </div>
       )}
 
-      {/* Modal Ajout Mission */}
+      {/* MODAL : CREATION MISSION + SYNCHRO GOOGLE CALENDAR */}
       {showMissionModal && selectedProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl border-t-4 border-t-amber-500">
             <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
               <div>
-                <h3 className="text-md font-bold text-foreground">Créer un rappel</h3>
-                <p className="text-xs text-muted-foreground">Pour le prospect : {selectedProspect.name}</p>
+                <h3 className="text-md font-bold text-foreground">Créer une action / RDV</h3>
+                <p className="text-xs text-muted-foreground">Pour : {selectedProspect.name}</p>
               </div>
               <button onClick={() => setShowMissionModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
             </div>
             
-            <form onSubmit={handleSubmitMission} className="space-y-4">
+            <form onSubmit={(e) => handleSubmitMission(e, false)} className="space-y-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Type d'action</label>
                 <select 
                   value={missionData.type}
                   onChange={(e) => setMissionData({...missionData, type: e.target.value})}
-                  className="w-full text-sm bg-background border border-input rounded-md p-2 outline-none text-foreground"
+                  className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground"
                 >
                   <option>Appel téléphonique</option>
                   <option>Envoi d'email / de document</option>
@@ -542,31 +575,85 @@ export function ProspectsPipeline() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">Titre de la mission *</label>
-                  <Input required value={missionData.titre} onChange={e => setMissionData({...missionData, titre: e.target.value})} className="text-sm" />
-                </div>
-              </div>
-              
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Date d'échéance (À faire pour le...) *</label>
-                <Input type="date" required value={missionData.echeance} onChange={e => setMissionData({...missionData, echeance: e.target.value})} className="text-sm w-full" />
+                <label className="text-xs text-muted-foreground block mb-1">Objet de l'action *</label>
+                <Input required value={missionData.titre} onChange={e => setMissionData({...missionData, titre: e.target.value})} className="text-xs" />
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Date *</label>
+                  <Input type="date" required value={missionData.echeance} onChange={e => setMissionData({...missionData, echeance: e.target.value})} className="text-xs w-full" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Heure de début</label>
+                  <Input type="time" value={missionData.heure} onChange={e => setMissionData({...missionData, heure: e.target.value})} className="text-xs w-full" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Durée prévisionnelle</label>
+                  <select 
+                    value={missionData.duree}
+                    onChange={(e) => setMissionData({...missionData, duree: e.target.value})}
+                    className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground"
+                  >
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="45">45 min</option>
+                    <option value="60">1 heure</option>
+                    <option value="120">2 heures</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Lieu / Lien visio</label>
+                  <Input placeholder="Ville, Adresse ou Lien" value={missionData.lieu} onChange={e => setMissionData({...missionData, lieu: e.target.value})} className="text-xs" />
+                </div>
+              </div>
+
+              {selectedProspect.email && (
+                <div className="flex items-center gap-2 pt-1">
+                  <input 
+                    type="checkbox" 
+                    id="invite-candidat"
+                    checked={missionData.inviterCandidat}
+                    onChange={(e) => setMissionData({...missionData, inviterCandidat: e.target.checked})}
+                    className="rounded border-border accent-primary"
+                  />
+                  <label htmlFor="invite-candidat" className="text-xs text-foreground cursor-pointer truncate">
+                    Inviter le candidat par e-mail ({selectedProspect.email})
+                  </label>
+                </div>
+              )}
+
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Détails / Notes supplémentaires</label>
+                <label className="text-xs text-muted-foreground block mb-1">Notes / Préparation</label>
                 <textarea 
-                  rows={3}
+                  rows={2}
                   value={missionData.description} 
                   onChange={e => setMissionData({...missionData, description: e.target.value})} 
-                  className="w-full text-sm bg-background border border-input rounded-md p-2 outline-none text-foreground resize-none" 
+                  className="w-full text-xs bg-background border border-input rounded-md p-2 outline-none text-foreground resize-none" 
                 />
               </div>
               
-              <div className="flex justify-end gap-2 pt-4 border-t border-border">
-                <Button type="button" variant="outline" onClick={() => setShowMissionModal(false)}>Annuler</Button>
-                <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white">Ajouter au calendrier</Button>
+              <div className="flex flex-col gap-2 pt-3 border-t border-border">
+                <Button 
+                  type="button" 
+                  onClick={(e) => handleSubmitMission(e, true)}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
+                >
+                  <ExternalLink className="mr-2 h-3.5 w-3.5" /> Enregistrer + Synchroniser Google Calendar
+                </Button>
+                
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" onClick={() => setShowMissionModal(false)} className="w-1/2 text-xs">
+                    Annuler
+                  </Button>
+                  <Button type="submit" variant="secondary" className="w-1/2 text-xs">
+                    CRM uniquement
+                  </Button>
+                </div>
               </div>
             </form>
           </div>
