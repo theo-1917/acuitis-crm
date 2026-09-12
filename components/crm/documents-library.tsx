@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { FileText, Upload, Trash2, Pencil, X, Plus, ExternalLink, MailTemplate } from "lucide-react"
+import { FileText, Upload, Trash2, Pencil, X, Plus, ExternalLink, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
@@ -147,7 +147,7 @@ export function DocumentsLibrary() {
             
             <div className="bg-muted/30 p-3 rounded-lg border border-border">
               <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-muted-foreground">
-                <MailTemplate className="h-3.5 w-3.5" /> Modèle d'e-mail :
+                <Mail className="h-3.5 w-3.5" /> Modèle d'e-mail :
               </div>
               <p className="text-xs text-muted-foreground/80 whitespace-pre-wrap line-clamp-3">
                 {decodeURIComponent(doc.modele_email || "").replace(/%0D%0A/g, '\n')}
@@ -210,7 +210,6 @@ export function DocumentsLibrary() {
                   required
                   value={decodeURIComponent(formData.modele_email).replace(/%0D%0A/g, '\n')}
                   onChange={e => {
-                    // Reconvertir les sauts de ligne pour l'URL mailto
                     const formatted = encodeURIComponent(e.target.value).replace(/%0A/g, '%0D%0A')
                     setFormData({...formData, modele_email: formatted})
                   }} 
