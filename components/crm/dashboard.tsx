@@ -10,6 +10,7 @@ import {
   MapPin,
   Table2,
   TrendingUp,
+  FileText, // Ajout de l'icône pour les documents
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dossiers } from "./dossiers"
@@ -19,6 +20,7 @@ import { NetworkMap } from "./network-map"
 import { Overview } from "./overview"
 import { ProspectsPipeline } from "./prospects-pipeline"
 import { RoiSimulator } from "./roi-simulator"
+import { DocumentsLibrary } from "./documents-library" // Ajout de l'import
 
 export function Dashboard() {
   const router = useRouter()
@@ -63,6 +65,13 @@ export function Dashboard() {
                 <CheckSquare data-icon="inline-start" />
                 Missions
               </TabsTrigger>
+              
+              {/* NOUVEAU BOUTON : Mes Documents */}
+              <TabsTrigger value="documents">
+                <FileText data-icon="inline-start" />
+                Mes Documents
+              </TabsTrigger>
+
               <TabsTrigger value="roi">
                 <TrendingUp data-icon="inline-start" />
                 Simulateur ROI
@@ -71,7 +80,6 @@ export function Dashboard() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-6">
-            {/* On passe la fonction de changement d'onglet à notre Overview */}
             <TabsContent value="overview" className="mt-0">
               <Overview onNavigate={setActiveTab} />
             </TabsContent>
@@ -88,6 +96,12 @@ export function Dashboard() {
             <TabsContent value="missions" className="mt-0">
               <Missions />
             </TabsContent>
+            
+            {/* NOUVELLE ZONE : Affichage de la bibliothèque */}
+            <TabsContent value="documents" className="mt-0">
+              <DocumentsLibrary />
+            </TabsContent>
+
             <TabsContent value="roi" className="mt-0">
               <RoiSimulator />
             </TabsContent>
