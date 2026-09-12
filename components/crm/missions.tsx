@@ -12,11 +12,15 @@ import {
   Plus,
   Trash2,
   X,
+  Users
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
+
+// 👇 La liste de l'équipe (à modifier ici si besoin, comme dans le pipeline)
+const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris"]
 
 type Mission = {
   id: number
@@ -26,6 +30,7 @@ type Mission = {
   echeance: string
   terminee: boolean
   created_at: string
+  assignes?: string[] // Ajout de la colonne des assignés
 }
 
 export function Missions() {
@@ -40,6 +45,7 @@ export function Missions() {
   const [formData, setFormData] = useState<Partial<Mission>>({
     priorite: "Moyenne",
     terminee: false,
+    assignes: []
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -80,14 +86,26 @@ export function Missions() {
 
   const handleOpenCreateModal = () => {
     setEditingMission(null)
-    setFormData({ priorite: "Moyenne", terminee: false })
+    setFormData({ priorite: "Moyenne", terminee: false, assignes: [] })
     setShowModal(true)
   }
 
   const handleOpenEditModal = (mission: Mission) => {
     setEditingMission(mission)
-    setFormData(mission)
+    setFormData({ ...mission, assignes: mission.assignes || [] })
     setShowModal(true)
+  }
+
+  const toggleAssignee = (name: string) => {
+    setFormData(prev => {
+      const currentAssignes = prev.assignes || []
+      return {
+        ...prev,
+        assignes: currentAssignes.includes(name)
+          ? currentAssignes.filter(n => n !== name)
+          : [...currentAssignes, name]
+      }
+    })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -107,6 +125,7 @@ export function Missions() {
           lie_a: formData.lie_a || "",
           echeance: formData.echeance || null,
           terminee: false,
+          assignes: formData.assignes || []
         },
       ])
       if (!error) await fetchMissions()
@@ -209,7 +228,7 @@ export function Missions() {
               <th className="p-4 w-12 text-center">État</th>
               <th className="p-4">Description</th>
               <th className="p-4 w-32">Priorité</th>
-              <th className="p-4">Lié à</th>
+              <th className="p-4">Lié à / Assigné à</th>
               <th className="p-4 w-40">Échéance</th>
               <th className="p-4 w-28 text-right">Actions</th>
             </tr>
@@ -236,15 +255,29 @@ export function Missions() {
                   </span>
                 </td>
                 <td className="p-4">{getPriorityBadge(mission.priorite)}</td>
-                <td className="p-4 text-xs text-muted-foreground">
-                  {mission.lie_a ? (
-                    <span className="flex items-center gap-1.5 text-foreground/80">
-                      <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      {mission.lie_a}
-                    </span>
-                  ) : (
-                    "-"
-                  )}
+                <td className="p-4">
+                  <div className="flex flex-col gap-1.5">
+                    {/* Lien (Projet/Dossier) */}
+                    {mission.lie_a ? (
+                      <span className="flex items-center gap-1.5 text-xs text-foreground/80">
+                        <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        {mission.lie_a}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+
+                    {/* Personnes assignées */}
+                    {mission.assignes && mission.assignes.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {mission.assignes.map(assigne => (
+                          <Badge key={assigne} variant="secondary" className="text-[9px] bg-primary/10 text-primary border-none px-1.5 py-0 rounded-sm">
+                            <Users className="h-2.5 w-2.5 mr-1" /> {assigne}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </td>
                 <td className="p-4 text-xs">
                   {mission.echeance ? (
@@ -355,6 +388,29 @@ export function Missions() {
                     onChange={(e) => setFormData({ ...formData, echeance: e.target.value })}
                     className="text-xs"
                   />
+                </div>
+              </div>
+
+              {/* NOUVEAU : ASSIGNATION D'ÉQUIPE */}
+              <div className="bg-muted/30 p-3 rounded-lg border border-border">
+                <label className="text-xs text-foreground font-semibold flex items-center gap-1 mb-2">
+                  <Users className="h-3.5 w-3.5" /> Assigner à :
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {EQUIPE.map(membre => {
+                    const isChecked = (formData.assignes || []).includes(membre)
+                    return (
+                      <label key={membre} className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[10px] transition-colors ${isChecked ? 'bg-primary/10 border-primary text-primary font-semibold' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}>
+                        <input 
+                          type="checkbox" 
+                          className="hidden" 
+                          checked={isChecked}
+                          onChange={() => toggleAssignee(membre)}
+                        />
+                        {membre}
+                      </label>
+                    )
+                  })}
                 </div>
               </div>
 
