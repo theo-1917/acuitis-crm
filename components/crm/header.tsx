@@ -133,7 +133,6 @@ export function Header() {
         return [headers.join(";"), ...rows].join("\n")
       }
 
-      // 2. Organisation des données SQL dans le ZIP
       const f1 = zip.folder("1_Prospects_et_Candidats")
       f1?.file("tous_les_prospects.csv", "\uFEFF" + toCSV(prospectsReq.data || []))
 
@@ -156,24 +155,30 @@ export function Header() {
       }, null, 2))
 
       // 3. ASPIRATION DES FICHIERS (BUCKETS STORAGE)
-      // Modifie ces noms si tes buckets dans Supabase s'appellent autrement
-      const BUCKETS_A_SAUVEGARDER = ["documents", "fichiers", "locaux", "dossiers"]
+      // ICI : Liste des noms possibles pour ton espace de stockage. Change-les si besoin !
+      const BUCKETS_A_SAUVEGARDER = ["documents", "fichiers", "locaux", "dossiers", "photos", "pieces_jointes"]
       const f5 = zip.folder("5_Fichiers_et_Pieces_Jointes")
 
       for (const bucket of BUCKETS_A_SAUVEGARDER) {
-        // Liste tous les fichiers dans le bucket
-        const { data: files } = await supabase.storage.from(bucket).list()
+        // Ajout de paramètre vide '' pour lister à la racine du bucket
+        const { data: files, error: listError } = await supabase.storage.from(bucket).list('')
+        
+        if (listError) {
+          console.warn(`Impossible de lire le bucket ${bucket}:`, listError.message)
+          continue
+        }
         
         if (files && files.length > 0) {
-          const bucketFolder = f5?.folder(bucket) // Crée un sous-dossier par bucket
+          const bucketFolder = f5?.folder(bucket) 
           
           for (const file of files) {
-            // On ignore les dossiers vides fantômes de Supabase
             if (file.name === '.emptyFolderPlaceholder' || !file.id) continue;
             
-            // Télécharge le fichier physique sous forme de "Blob"
-            const { data: fileData } = await supabase.storage.from(bucket).download(file.name)
-            if (fileData) {
+            const { data: fileData, error: downloadError } = await supabase.storage.from(bucket).download(file.name)
+            
+            if (downloadError) {
+              console.error(`Erreur téléchargement ${file.name}:`, downloadError.message)
+            } else if (fileData) {
               bucketFolder?.file(file.name, fileData)
             }
           }
@@ -191,7 +196,7 @@ export function Header() {
 
     } catch (e) {
       console.error("Erreur backup:", e)
-      alert("Une erreur est survenue lors de la création de la sauvegarde.")
+      alert("Une erreur est survenue lors de la création de la sauvegarde. Regardez la console (F12) pour plus de détails.")
     }
     setIsBackingUp(false)
   }
