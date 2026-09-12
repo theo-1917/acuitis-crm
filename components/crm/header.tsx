@@ -14,6 +14,10 @@ const PROVENANCES = ["Prospection téléphonique", "Site internet", "Contact SIL
 export function Header() {
   const router = useRouter()
   
+  // États de l'utilisateur connecté
+  const [userInitials, setUserInitials] = useState("..")
+  const [userEmail, setUserEmail] = useState("")
+
   // États recherche
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<any[]>([])
@@ -33,7 +37,19 @@ export function Header() {
     name: "", telephone: "", email: "", ville: "", apport: "", statut: "Nouveau", provenance: "Site internet", actif: true
   })
 
-  // Chargement des missions urgentes (Sécurisé)
+  // 1. Récupération de l'utilisateur connecté (Email + Initiales)
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user?.email) {
+        setUserEmail(session.user.email)
+        setUserInitials(session.user.email.substring(0, 2).toUpperCase())
+      }
+    }
+    fetchUser()
+  }, [])
+
+  // 2. Chargement des missions urgentes (Sécurisé)
   useEffect(() => {
     const fetchUrgentMissions = async () => {
       try {
@@ -59,7 +75,7 @@ export function Header() {
     fetchUrgentMissions()
   }, [])
 
-  // Moteur de recherche globale (Sécurisé)
+  // 3. Moteur de recherche globale
   useEffect(() => {
     const delayDebounce = setTimeout(async () => {
       if (searchQuery.length < 2) {
@@ -215,16 +231,18 @@ export function Header() {
               e.stopPropagation()
               setShowUserMenu(!showUserMenu)
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-muted border border-border text-sm font-medium text-foreground transition hover:border-primary"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-sm font-bold text-primary transition hover:border-primary uppercase"
           >
-            MD
+            {userInitials}
           </button>
 
           {showUserMenu && (
-            <div className="absolute right-0 top-12 w-48 rounded-lg border border-border bg-card shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-12 w-56 rounded-lg border border-border bg-card shadow-xl z-50 overflow-hidden">
               <div className="px-4 py-3 border-b border-border bg-muted/20">
-                <p className="text-sm font-semibold text-foreground">Mon Compte</p>
-                <p className="text-xs text-muted-foreground">Admin Réseau</p>
+                <p className="text-sm font-semibold text-foreground truncate" title={userEmail}>
+                  {userEmail || "Mon Compte"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Admin Réseau Acuitis</p>
               </div>
               <button 
                 type="button"
@@ -293,6 +311,16 @@ export function Header() {
                       {PROVENANCES.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                 </div>
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                  <input 
+                    type="checkbox" 
+                    id="header-actif"
+                    checked={formData.actif}
+                    onChange={(e) => setFormData({...formData, actif: e.target.checked})}
+                    className="rounded border-border accent-primary"
+                  />
+                  <label htmlFor="header-actif" className="text-xs text-foreground cursor-pointer">Prospect Actif</label>
               </div>
               
               <div className="flex justify-end gap-2 pt-4 border-t border-border mt-4">
