@@ -236,7 +236,7 @@ export function Dossiers() {
     }
   }
 
-  // Fonctions de modales Missions/Docs/Histo
+  // === FONCTIONS MODALES (Missions, Docs, Histo) ===
   const handleOpenMission = (p: Prospect) => {
     setSelectedProspect(p)
     const defaultAssignes = p.developpeur_assigne ? [p.developpeur_assigne] : []
@@ -268,16 +268,30 @@ export function Dossiers() {
     return url
   }
 
+  // CORRECTION : L'ouverture doit être instantanée pour mobile
   const handleSubmitMission = async (e: React.FormEvent, openGoogleCal: boolean = false) => {
-    e.preventDefault(); if (!selectedProspect) return
+    e.preventDefault(); 
+    if (!selectedProspect) return
+
+    // 1. Ouverture immédiate du calendrier Google pour contrer les pop-up blockers mobiles
+    if (openGoogleCal) {
+      window.open(getGoogleCalendarUrl(), '_blank')
+    }
+
+    // 2. Sauvegarde dans la base de données en arrière-plan
     const { error } = await supabase.from('missions').insert([{ 
       title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, 
       description: `${missionData.description}\nHeure : ${missionData.heure} (${missionData.duree} min) | Lieu : ${missionData.lieu || '-'}`, 
-      echeance: missionData.echeance, prospect_id: selectedProspect.id, terminee: false, assignes: missionData.assignes
+      echeance: missionData.echeance, 
+      prospect_id: selectedProspect.id, 
+      terminee: false, 
+      assignes: missionData.assignes
     }])
+    
     if (!error) {
-      if (openGoogleCal) window.open(getGoogleCalendarUrl(), '_blank')
       setShowMissionModal(false)
+    } else {
+      alert("La mission n'a pas pu être sauvegardée dans le CRM : " + error.message)
     }
   }
 
@@ -429,7 +443,6 @@ export function Dossiers() {
 
             <div className="flex flex-wrap items-center gap-2">
               
-              {/* NOUVEAU : SÉLECTEUR D'ASSIGNATION & BOUTONS D'ACTION */}
               <div className="flex items-center gap-1 mr-2 border-r border-border pr-3">
                 <select 
                   className="text-xs font-semibold bg-muted/30 border border-border rounded-md px-2 py-1.5 outline-none text-muted-foreground hover:text-primary cursor-pointer" 
@@ -626,7 +639,7 @@ export function Dossiers() {
         </div>
       )}
 
-      {/* === MODALES (Identiques au Pipeline) === */}
+      {/* === MODALES === */}
       {/* MODAL : ENVOI DE DOCUMENT */}
       {showDocModal && selectedProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
