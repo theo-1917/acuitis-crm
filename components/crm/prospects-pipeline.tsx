@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 import { formatEuro } from "@/lib/crm-data"
 
-type Prospect = { id: number; name: string; ville: string; telephone: string; email: string; apport: number; statut: string; actif: boolean; provenance: string; created_at: string }
+type Prospect = { id: number; name: string; ville: string; telephone: string; email: string; apport: number; statut: string; actif: boolean; provenance: string; created_at: string; est_franchise?: boolean }
 type Mission = { id: number; title: string; description: string; echeance: string; terminee: boolean; prospect_id: number }
 type DocumentModel = { id: number; titre: string; url_fichier: string; modele_email: string }
 
@@ -22,7 +22,7 @@ export function ProspectsPipeline() {
   
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [formData, setFormData] = useState<Partial<Prospect>>({ statut: "Nouveau", actif: true, provenance: "Site internet" })
+  const [formData, setFormData] = useState<Partial<Prospect>>({ statut: "Nouveau", actif: true, provenance: "Site internet", est_franchise: false })
 
   const [showMissionModal, setShowMissionModal] = useState(false)
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null)
@@ -33,7 +33,6 @@ export function ProspectsPipeline() {
   const [prospectMissions, setProspectMissions] = useState<Mission[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
 
-  // États pour l'envoi de documents
   const [showDocModal, setShowDocModal] = useState(false)
   const [availableDocs, setAvailableDocs] = useState<DocumentModel[]>([])
   const [selectedDocId, setSelectedDocId] = useState<string>("")
@@ -82,7 +81,7 @@ export function ProspectsPipeline() {
       const { id, created_at, ...updateData } = formData as any
       await supabase.from("prospects").update(updateData).eq("id", editingId)
     } else await supabase.from("prospects").insert([formData])
-    setShowModal(false); setEditingId(null); setFormData({ statut: "Nouveau", actif: true, provenance: "Site internet" }); fetchProspects()
+    setShowModal(false); setEditingId(null); setFormData({ statut: "Nouveau", actif: true, provenance: "Site internet", est_franchise: false }); fetchProspects()
   }
 
   const handleOpenMission = (p: Prospect) => {
@@ -126,7 +125,6 @@ export function ProspectsPipeline() {
     setProspectMissions(prev => prev.map(m => m.id === missionId ? { ...m, terminee: !currentStatus } : m))
   }
 
-  // Ouverture de la modale pour envoyer un document
   const handleOpenDocModal = async (p: Prospect) => {
     setSelectedProspect(p)
     setShowDocModal(true)
@@ -139,7 +137,6 @@ export function ProspectsPipeline() {
     }
   }
 
-  // Envoi du document via Mailto
   const handleSendDocument = async () => {
     if (!selectedProspect || !selectedDocId) return
     const doc = availableDocs.find(d => d.id.toString() === selectedDocId)
@@ -151,10 +148,8 @@ export function ProspectsPipeline() {
     const subject = encodeURIComponent(`Document Acuitis : ${doc.titre}`)
     const mailtoLink = `mailto:${selectedProspect.email || ""}?subject=${subject}&body=${corpsEmail}`
     
-    // Ouvre le client mail par défaut (Gmail, Outlook, etc.)
     window.open(mailtoLink, '_blank')
 
-    // Ajoute l'action dans l'historique de Supabase
     await supabase.from('missions').insert([{ 
       title: `[Document envoyé] ${doc.titre}`, 
       description: `Généré automatiquement par le CRM vers l'adresse ${selectedProspect.email || "non renseignée"}.`,
@@ -162,8 +157,74 @@ export function ProspectsPipeline() {
       prospect_id: selectedProspect.id, 
       terminee: true 
     }])
-
     setShowDocModal(false)
+  }
+
+  const handleExportData = () => {
+    const headers = ["ID", "Nom", "Ville", "Téléphone", "Email", "Apport", "Statut", "Provenance", "Actif", "Franchisé Existant", "Date de création"]
+    const rows = prospects.map(p => [
+      p.id, `"${p.name || ""}"`, `"${p.ville || ""}"`, `"${p.telephone || ""}"`, `"${p.email || ""}"`, p.apport || 0, `"${p.statut || ""}"`, `"${p.provenance || ""}"`, p.actif ? "Oui" : "Non", p.est_franchise ? "Oui" : "Non", new Date(p.created_at).toLocaleDateString("fr-FR")
+    ])
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(";"), ...rows.map(e => e.join(";"))].join("\n")
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement("a"); link.href = encodedUri; link.download = `candidats_data_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+  }
+
+  const handleExportKPI = () => {
+    // SÉPARATION DES KPI : EXTERNES (Acquisition) vs INTERNES (Franchisés existants)
+    const prospectsExternes = prospects.filter(p => !p.est_franchise)
+    const franchisesExistants = prospects.filter(p => p.est_franchise)
+
+    const total = prospectsExternes.length
+    const valides = prospectsExternes.filter(p => p.statut === "Validé").length
+    const perdus = prospectsExternes.filter(p => p.statut === "Non qualifié" || p.statut === "Perdu").length
+    const enCours = total - valides - perdus
+
+    // Stats par mois (Uniquement sur l'externe pour garder la pureté de la donnée)
+    const prospectsByMonthYear: Record<string, Prospect[]> = {}
+    prospectsExternes.forEach(p => {
+      const d = new Date(p.created_at)
+      if (isNaN(d.getTime())) return
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!prospectsByMonthYear[key]) prospectsByMonthYear[key] = []
+      prospectsByMonthYear[key].push(p)
+    })
+    const sortedMonthKeys = Object.keys(prospectsByMonthYear).sort()
+
+    const statusByMonthHeader = `Période (Mois/Année);${COLUMNS.join(";")};Total`
+    const statusByMonthLines = sortedMonthKeys.map(key => {
+      const list = prospectsByMonthYear[key]
+      const [year, month] = key.split('-')
+      const monthLabel = new Date(Number(year), Number(month) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      const counts = COLUMNS.map(col => list.filter(p => (p.statut || "Nouveau") === col).length)
+      return `"${monthLabel}";${counts.join(';')};${list.length}`
+    })
+
+    const csvLines = [
+      "RAPPORT ANALYTIQUE ET KPI - DÉVELOPPEMENT RÉSEAU ACUITIS",
+      `Date de l'export;${new Date().toLocaleDateString("fr-FR")}`,
+      "",
+      "--- 1. INDICATEURS CLÉS (ACQUISITION EXTERNE UNIQUEMENT) ---",
+      `Total des candidatures générées;${total}`,
+      `Candidats en cours de traitement;${enCours}`,
+      `CANDIDATS VALIDÉS (Recherche de locaux en cours);${valides}`,
+      `Candidats non retenus (Non qualifiés / Perdus);${perdus}`,
+      `Taux de transformation global;${total > 0 ? ((valides / total) * 100).toFixed(1) + "%" : "0%"}`,
+      "",
+      "--- 2. PERFORMANCE DU TUNNEL (STATUTS) PAR MOIS (EXTERNE) ---",
+      statusByMonthHeader,
+      ...statusByMonthLines,
+      "",
+      "--- 3. DÉVELOPPEMENT INTERNE (MULTI-FRANCHISE) ---",
+      `Total de projets d'ouvertures internes (Franchisés existants);${franchisesExistants.length}`,
+      `Projets internes Validés / En cours;${franchisesExistants.filter(p => p.statut === "Validé").length}`,
+    ]
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvLines.join("\n")
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement("a"); link.href = encodedUri; link.download = `rapport_kpi_conversion_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link); link.click(); document.body.removeChild(link)
   }
 
   if (loading) return <div className="p-4 text-muted-foreground">Chargement du pipeline...</div>
@@ -178,10 +239,21 @@ export function ProspectsPipeline() {
           <p className="text-sm text-muted-foreground">Suivi des candidatures à la franchise.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          
+          <Button variant="outline" size="sm" onClick={handleExportData} className="border-border bg-muted/20 text-xs">
+            <Download className="mr-2 h-3.5 w-3.5" /> Données Brutes
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={handleExportKPI} className="border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold">
+            <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI
+          </Button>
+
+          <div className="w-px h-6 bg-border mx-1 hidden sm:block"></div>
+
           <Button variant="outline" size="sm" onClick={() => setShowInactive(!showInactive)} className="text-xs">
             {showInactive ? <EyeOff className="mr-2 h-3.5 w-3.5" /> : <Eye className="mr-2 h-3.5 w-3.5" />} {showInactive ? "Masquer Perdus" : "Voir Perdus"}
           </Button>
-          <Button size="sm" onClick={() => { setEditingId(null); setFormData({ statut: "Nouveau", actif: true, provenance: "Site internet" }); setShowModal(true) }}>
+          <Button size="sm" onClick={() => { setEditingId(null); setFormData({ statut: "Nouveau", actif: true, provenance: "Site internet", est_franchise: false }); setShowModal(true) }}>
             <Plus className="mr-2 h-4 w-4" /> Ajouter
           </Button>
         </div>
@@ -201,16 +273,28 @@ export function ProspectsPipeline() {
                 {columnProspects.map(p => (
                   <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
                     <div className="flex justify-between items-start">
-                      <div className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors" onClick={() => handleOpenHistory(p)}>
-                        {p.name}
+                      
+                      {/* NOM + BADGE FRANCHISÉ */}
+                      <div className="flex flex-col items-start gap-1">
+                        <div className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors" onClick={() => handleOpenHistory(p)}>
+                          {p.name}
+                        </div>
+                        {p.est_franchise && (
+                          <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] px-1.5 py-0 uppercase tracking-wider">
+                            👑 Franchisé
+                          </Badge>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1">
+
+                      <div className="flex items-center gap-1 shrink-0">
                         <button onClick={() => handleToggleActif(p)} className={`p-1 rounded transition ${p.actif === false ? 'text-emerald-400 hover:bg-emerald-500/20' : 'text-muted-foreground hover:text-amber-400 hover:bg-amber-500/20'}`}>
                           {p.actif === false ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
                         </button>
                       </div>
                     </div>
-                    <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mb-1">{p.provenance || "Autre"}</div>
+
+                    <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mb-1 mt-1">{p.provenance || "Autre"}</div>
+                    
                     <div className="text-xs text-muted-foreground flex flex-col gap-1 mt-0.5">
                       {p.ville && <div className="flex items-center gap-1.5"><MapPin className="h-3 w-3" /> {p.ville}</div>}
                       {p.telephone && <div className="flex items-center gap-1.5"><Phone className="h-3 w-3" /> {p.telephone}</div>}
@@ -220,24 +304,17 @@ export function ProspectsPipeline() {
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
                       <span className="text-xs font-semibold text-emerald-400 truncate pr-2">{p.apport ? formatEuro(p.apport) : "-"}</span>
                       
-                      {/* === ZONE DES BOUTONS === */}
                       <div className="flex items-center gap-1 shrink-0">
-                        
-                        {/* BOUTON ENVOYER DOCUMENT (Avion en papier violet) */}
                         {p.actif !== false && (
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10" title="Envoyer un document (DIP...)" onClick={() => handleOpenDocModal(p)}>
                             <Send className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        
-                        {/* BOUTON CALENDRIER */}
                         {p.actif !== false && (
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10" title="Créer un rappel" onClick={() => handleOpenMission(p)}>
                             <CalendarPlus className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        
-                        {/* BOUTON HISTORIQUE */}
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10" title="Historique" onClick={() => handleOpenHistory(p)}>
                           <ClipboardList className="h-3.5 w-3.5" />
                         </Button>
@@ -425,7 +502,7 @@ export function ProspectsPipeline() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
             <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
-              <h3 className="text-md font-semibold text-foreground">{editingId ? "Modifier le candidat" : "Nouveau candidat"}</h3>
+              <h3 className="text-md font-semibold text-foreground">{editingId ? "Modifier le profil" : "Nouveau contact"}</h3>
               <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
             </div>
             
@@ -468,10 +545,27 @@ export function ProspectsPipeline() {
                     </select>
                 </div>
               </div>
-              <div className="flex items-center gap-2 pt-2">
-                  <input type="checkbox" id="actif-checkbox" checked={formData.actif !== false} onChange={(e) => setFormData({...formData, actif: e.target.checked})} className="rounded border-border accent-primary" />
-                  <label htmlFor="actif-checkbox" className="text-xs text-foreground cursor-pointer">Prospect Actif (Visible dans le pipeline)</label>
+
+              {/* NOUVEAU : CASE FRANCHISÉ EXISTANT */}
+              <div className="flex items-center gap-2 pt-2 border-t border-border mt-2">
+                  <input type="checkbox" id="franchise-checkbox" checked={formData.est_franchise || false} onChange={(e) => {
+                    const isFranchise = e.target.checked
+                    setFormData({
+                      ...formData, 
+                      est_franchise: isFranchise, 
+                      statut: isFranchise ? "Validé" : (formData.statut || "Nouveau") // Passe en Validé automatiquement
+                    })
+                  }} className="rounded border-border accent-blue-500" />
+                  <label htmlFor="franchise-checkbox" className="text-xs text-blue-500 font-semibold cursor-pointer">
+                    👑 C'est un franchisé existant (Multi-franchise)
+                  </label>
               </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                  <input type="checkbox" id="actif-checkbox" checked={formData.actif !== false} onChange={(e) => setFormData({...formData, actif: e.target.checked})} className="rounded border-border accent-primary" />
+                  <label htmlFor="actif-checkbox" className="text-xs text-foreground cursor-pointer">Actif (Visible dans le pipeline)</label>
+              </div>
+              
               <div className="flex justify-end gap-2 pt-4 border-t border-border">
                 <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Annuler</Button>
                 <Button type="submit">Sauvegarder</Button>
