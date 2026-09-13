@@ -74,10 +74,23 @@ export function ProspectsPipeline() {
     await supabase.from("prospects").update({ statut: "Validé", actif: true }).eq("id", p.id)
   }
 
+  // === CORRECTION : SUPPRESSION PROPRE SANS FANTÔMES ===
   const handleDelete = async (id: number) => {
-    if (!confirm("Supprimer définitivement ce prospect ?")) return
-    await supabase.from("prospects").delete().eq("id", id)
-    fetchProspects()
+    if (!confirm("Supprimer définitivement ce prospect ? (Cela supprimera aussi son historique, ses missions et ses dossiers)")) return
+    
+    // 1. On nettoie toutes les dépendances
+    await supabase.from("missions").delete().eq("prospect_id", id)
+    await supabase.from("emplacements").delete().eq("prospect_id", id)
+    await supabase.from("dossiers").delete().eq("prospect_id", id)
+    
+    // 2. On supprime enfin le prospect
+    const { error } = await supabase.from("prospects").delete().eq("id", id)
+    
+    if (error) {
+      alert("Erreur lors de la suppression : " + error.message)
+    } else {
+      fetchProspects()
+    }
   }
 
   const handleEdit = (p: Prospect) => { setFormData(p); setEditingId(p.id); setShowModal(true) }
@@ -125,17 +138,14 @@ export function ProspectsPipeline() {
     return url
   }
 
-  // CORRECTION POUR MOBILE : L'ouverture doit être immédiate (synchrone)
   const handleSubmitMission = async (e: React.FormEvent, openGoogleCal: boolean = false) => {
     e.preventDefault(); 
     if (!selectedProspect) return
 
-    // 1. On ouvre le calendrier IMMÉDIATEMENT pour contrer le bloqueur de pop-up Safari/Android
     if (openGoogleCal) {
       window.open(getGoogleCalendarUrl(), '_blank')
     }
 
-    // 2. On sauvegarde dans la base de données en arrière-plan
     const { error } = await supabase.from('missions').insert([{ 
       title: `[${missionData.type}] ${missionData.titre} (${selectedProspect.name})`, 
       description: `${missionData.description}\nHeure : ${missionData.heure} (${missionData.duree} min) | Lieu : ${missionData.lieu || '-'}`, 
@@ -203,12 +213,9 @@ export function ProspectsPipeline() {
   const handleExportData = () => { /* Code existant */ }
   const handleExportKPI = () => { /* Code existant */ }
 
-  // NOUVEAU : EXPORT TABLEAU QUALITATIF POUR RÉUNION MENSUELLE
   const handleExportReunion = async () => {
-    // On récupère les dossiers pour avoir les commentaires et dates
     const { data: dossiers } = await supabase.from("dossiers").select("*")
 
-    // On ne garde que les RDV, Validés, et Franchisés Existants
     const prospectsReunion = prospects.filter(p => 
       p.statut === "RDV" || 
       p.statut === "Validé" || 
@@ -238,7 +245,7 @@ export function ProspectsPipeline() {
         `"${dev}"`,
         `"${statut}"`,
         `"${timing}"`,
-        `"${commentaires.replace(/"/g, '""').replace(/\n/g, ' ')}"` // Sécurise les guillemets et sauts de ligne pour Excel
+        `"${commentaires.replace(/"/g, '""').replace(/\n/g, ' ')}"`
       ]
     })
 
@@ -277,7 +284,6 @@ export function ProspectsPipeline() {
             <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI
           </Button>
 
-          {/* NOUVEAU BOUTON : Tableau Réunion */}
           <Button variant="outline" size="sm" onClick={handleExportReunion} className="border-blue-500/30 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 text-xs font-bold">
             <FileSpreadsheet className="mr-2 h-3.5 w-3.5" /> Tableau Réunion Dév.
           </Button>
