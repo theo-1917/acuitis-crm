@@ -10,7 +10,7 @@ import {
   MapPin,
   Table2,
   TrendingUp,
-  FileText, // Ajout de l'icône pour les documents
+  FileText,
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dossiers } from "./dossiers"
@@ -20,7 +20,8 @@ import { NetworkMap } from "./network-map"
 import { Overview } from "./overview"
 import { ProspectsPipeline } from "./prospects-pipeline"
 import { RoiSimulator } from "./roi-simulator"
-import { DocumentsLibrary } from "./documents-library" // Ajout de l'import
+import { DocumentsLibrary } from "./documents-library"
+import { Emplacements } from "./emplacements" // <-- L'IMPORT EST ICI !
 
 export function Dashboard() {
   const router = useRouter()
@@ -46,13 +47,13 @@ export function Dashboard() {
                 <Table2 data-icon="inline-start" />
                 Pipeline Prospects
               </TabsTrigger>
-              <TabsTrigger
-                value="emplacements"
-                onClick={() => router.push("/emplacements")}
-              >
+              
+              {/* MODIFICATION ICI : On enlève le router.push ! */}
+              <TabsTrigger value="emplacements">
                 <MapPin data-icon="inline-start" />
                 Recherche d'emplacements
               </TabsTrigger>
+              
               <TabsTrigger value="dossiers">
                 <FolderKanban data-icon="inline-start" />
                 Dossiers & Projets
@@ -65,13 +66,10 @@ export function Dashboard() {
                 <CheckSquare data-icon="inline-start" />
                 Missions
               </TabsTrigger>
-              
-              {/* NOUVEAU BOUTON : Mes Documents */}
               <TabsTrigger value="documents">
                 <FileText data-icon="inline-start" />
                 Mes Documents
               </TabsTrigger>
-
               <TabsTrigger value="roi">
                 <TrendingUp data-icon="inline-start" />
                 Simulateur ROI
@@ -83,10 +81,15 @@ export function Dashboard() {
             <TabsContent value="overview" className="mt-0">
               <Overview onNavigate={setActiveTab} />
             </TabsContent>
-            
             <TabsContent value="pipeline" className="mt-0">
               <ProspectsPipeline />
             </TabsContent>
+            
+            {/* NOUVELLE ZONE : Affichage de l'onglet Emplacements */}
+            <TabsContent value="emplacements" className="mt-0">
+              <Emplacements />
+            </TabsContent>
+            
             <TabsContent value="dossiers" className="mt-0">
               <Dossiers />
             </TabsContent>
@@ -96,12 +99,9 @@ export function Dashboard() {
             <TabsContent value="missions" className="mt-0">
               <Missions />
             </TabsContent>
-            
-            {/* NOUVELLE ZONE : Affichage de la bibliothèque */}
             <TabsContent value="documents" className="mt-0">
               <DocumentsLibrary />
             </TabsContent>
-
             <TabsContent value="roi" className="mt-0">
               <RoiSimulator />
             </TabsContent>
