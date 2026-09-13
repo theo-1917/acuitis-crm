@@ -25,9 +25,10 @@ export function RoiSimulator() {
   const [fraisArchi, setFraisArchi] = useState(28000)
   const [brokers, setBrokers] = useState(10000)
   const [debours, setDebours] = useState(3000)
-  const [materielHorsLeasing, setMaterielHorsLeasing] = useState(10000)
   const [fraisJuridiques, setFraisJuridiques] = useState(3000)
   const [autresFraisInvest, setAutresFraisInvest] = useState(0)
+  const [materielHorsLeasing, setMaterielHorsLeasing] = useState(10000)
+  const [materielLeasing, setMaterielLeasing] = useState(51000) // DÉPLACÉ ET PAR DÉFAUT À 51K
   
   const [cautionMois, setCautionMois] = useState(3)
   const [fraisPreouv, setFraisPreouv] = useState(15000)
@@ -35,12 +36,11 @@ export function RoiSimulator() {
   const [droitEntree, setDroitEntree] = useState(30000)
   const [stockDemarrage, setStockDemarrage] = useState(50000)
 
-  // === ÉTATS : FRAIS FIXES & LEASING ===
+  // === ÉTATS : FRAIS FIXES & LOCAL ===
   const [loyerAnnuel, setLoyerAnnuel] = useState(36000)
   const [abattementY1, setAbattementY1] = useState(0)
   const [abattementY2, setAbattementY2] = useState(0)
   const [chargesLocal, setChargesLocal] = useState(3000)
-  const [materielLeasing, setMaterielLeasing] = useState(100000)
 
   // === ÉTATS : FINANCEMENT ===
   const [apport, setApport] = useState(80000)
@@ -62,7 +62,7 @@ export function RoiSimulator() {
   // MOTEUR DE CALCUL MATHÉMATIQUE
   // ==========================================
 
-  // 1. INVESTISSEMENT & EMPRUNT
+  // 1. INVESTISSEMENT & EMPRUNT (Attention: le Leasing n'entre pas dans le besoin de financement bancaire)
   const loyerMensuel = loyerAnnuel / 12
   const caution = loyerMensuel * cautionMois
   const totalInvestissement = travaux + fraisArchi + brokers + debours + materielHorsLeasing + fraisJuridiques + autresFraisInvest + caution + fraisPreouv + bfr + droitEntree + stockDemarrage
@@ -155,14 +155,14 @@ export function RoiSimulator() {
     const srHT = fraisFixesCash / Math.max(0.01, tmcDecimal)
 
     yearsData.push({
-      caOpt, caAud, caTot, margeBrute, personnel, chargesEspace, comLocal, autresFrais, fraisGen, totalFraisMagasin, 
+      caOpt, caAud, caTot, margeBrute, personnel, chargesEspace, comLocal, autresFrais, fraisGen, totalFraisMagasin, leasing: leasingAnnuel, // CORRECTION DU BUG ICI
       ebitdaMagasin, ebitMagasin, comNat, royalties, fraisPreouvExce, ebitdaApresFranchise, ebitSte, fraisFinanciers, 
       is, resultatNet, cashFlowBrut, rembCapital, cashFlowNet, cumulCashFlow, srHT
     })
   }
 
   // TVA Moyenne Ponderée pour le Seuil de rentabilité TTC
-  const tvaMoyenne = caY1 => ((caOptiqueHT * 0.20) + (caAudioHT * 0.055)) / (caOptiqueHT + caAudioHT)
+  const tvaMoyenne = () => ((caOptiqueHT * 0.20) + (caAudioHT * 0.055)) / (caOptiqueHT + caAudioHT)
   
   // Formatage monétaire complet
   const f = (val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val || 0)
@@ -261,9 +261,13 @@ export function RoiSimulator() {
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Architecte/Pilote</label><Input type="number" value={fraisArchi} onChange={e => setFraisArchi(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Honoraires Brokers</label><Input type="number" value={brokers} onChange={e => setBrokers(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Débours Architecte</label><Input type="number" value={debours} onChange={e => setDebours(Number(e.target.value))} className="text-xs" /></div>
-              <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Juridiques</label><Input type="number" value={fraisJuridiques} onChange={e => setFraisJuridiques(Number(e.target.value))} className="text-xs border-primary/20" /></div>
-              <div><label className="text-[11px] text-muted-foreground mb-1 block">Autres Frais Invest.</label><Input type="number" value={autresFraisInvest} onChange={e => setAutresFraisInvest(Number(e.target.value))} className="text-xs border-primary/20" /></div>
+              <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Juridiques</label><Input type="number" value={fraisJuridiques} onChange={e => setFraisJuridiques(Number(e.target.value))} className="text-xs" /></div>
+              <div><label className="text-[11px] text-muted-foreground mb-1 block">Autres Frais Invest.</label><Input type="number" value={autresFraisInvest} onChange={e => setAutresFraisInvest(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Matériel (Hors Leasing)</label><Input type="number" value={materielHorsLeasing} onChange={e => setMaterielHorsLeasing(Number(e.target.value))} className="text-xs" /></div>
+              
+              {/* LEASING DÉPLACÉ ICI */}
+              <div><label className="text-[11px] text-violet-500 font-semibold mb-1 block">Matériel Leasing (5 ans)</label><Input type="number" value={materielLeasing} onChange={e => setMaterielLeasing(Number(e.target.value))} className="text-xs border-violet-500/30 bg-violet-500/5" title="Financé par crédit-bail, n'entre pas dans l'emprunt bancaire classique" /></div>
+              
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Stock de démarrage</label><Input type="number" value={stockDemarrage} onChange={e => setStockDemarrage(Number(e.target.value))} className="text-xs border-amber-500/30" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Dépôt garantie (Nb mois)</label><Input type="number" value={cautionMois} onChange={e => setCautionMois(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Pré-Ouverture</label><Input type="number" value={fraisPreouv} onChange={e => setFraisPreouv(Number(e.target.value))} className="text-xs" /></div>
@@ -283,22 +287,21 @@ export function RoiSimulator() {
             </div>
           </div>
 
-          {/* 4. FRAIS FIXES & LEASING */}
+          {/* 4. FRAIS FIXES & LOCAL */}
           <div className="rounded-xl border border-border bg-card p-5">
-            <h3 className="font-semibold text-foreground text-sm flex items-center gap-2 border-b border-border pb-3 mb-4"><Building className="h-4 w-4 text-primary" /> 4. Local & Leasing</h3>
+            <h3 className="font-semibold text-foreground text-sm flex items-center gap-2 border-b border-border pb-3 mb-4"><Building className="h-4 w-4 text-primary" /> 4. Local & Frais Fixes</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 border-b border-border pb-4">
               <div><label className="text-[11px] text-muted-foreground mb-1 block font-bold">Loyer Annuel (€)</label><Input type="number" value={loyerAnnuel} onChange={e => setLoyerAnnuel(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Charges Locales (€)</label><Input type="number" value={chargesLocal} onChange={e => setChargesLocal(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-amber-500 mb-1 block">Abattement Loyer Y1 (€)</label><Input type="number" value={abattementY1} onChange={e => setAbattementY1(Number(e.target.value))} className="text-xs border-amber-500/30 bg-amber-500/5" /></div>
               <div><label className="text-[11px] text-amber-500 mb-1 block">Abattement Loyer Y2 (€)</label><Input type="number" value={abattementY2} onChange={e => setAbattementY2(Number(e.target.value))} className="text-xs border-amber-500/30 bg-amber-500/5" /></div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="text-[11px] text-muted-foreground mb-1 block">Matériel en Leasing (Amorti sur 5 ans)</label><Input type="number" value={materielLeasing} onChange={e => setMaterielLeasing(Number(e.target.value))} className="text-xs" /></div>
-              <div className="bg-muted/30 p-2 rounded flex flex-col justify-center border border-border">
-                <span className="text-[10px] text-muted-foreground font-semibold">Frais Variables Acuitis (Vérrouillés)</span>
-                <span className="text-xs">1% Royalties (Min 5k) + 6% Com (Nat/Loc)<br/>+ 8% Frais Généraux (Fixes/Autres)</span>
-              </div>
+            
+            <div className="bg-muted/30 p-3 rounded flex flex-col justify-center border border-border">
+              <span className="text-[11px] text-foreground font-semibold">Frais Variables Acuitis (Verrouillés dans le système)</span>
+              <span className="text-xs text-muted-foreground">1% Royalties (Min 5k) + 6% Com (Nat/Loc) + 8% Frais Généraux (Fixes/Autres)</span>
             </div>
+            
           </div>
 
           {/* 5. RESSOURCES HUMAINES */}
