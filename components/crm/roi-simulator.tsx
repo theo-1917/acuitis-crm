@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Calculator, Euro, TrendingUp, Building, Users, FileText, Plus, Trash2, SlidersHorizontal } from "lucide-react"
+import { Calculator, Euro, TrendingUp, Building, Users, FileText, Plus, Trash2, SlidersHorizontal, Landmark, FileSpreadsheet } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -10,8 +10,8 @@ type Employee = { id: number; role: string; netMonthly: number; type: "1.44" | "
 
 export function RoiSimulator() {
   // === ÉTATS : HYPOTHÈSES GÉNÉRALES ===
-  const [caOptiqueY1, setCaOptiqueY1] = useState(300000)
-  const [caAudioY1, setCaAudioY1] = useState(150000)
+  const [caOptiqueHT, setCaOptiqueHT] = useState(300000)
+  const [caAudioHT, setCaAudioHT] = useState(150000)
   
   const [growthY2, setGrowthY2] = useState(20)
   const [growthY3, setGrowthY3] = useState(15)
@@ -26,6 +26,9 @@ export function RoiSimulator() {
   const [brokers, setBrokers] = useState(10000)
   const [debours, setDebours] = useState(3000)
   const [materielHorsLeasing, setMaterielHorsLeasing] = useState(10000)
+  const [fraisJuridiques, setFraisJuridiques] = useState(3000)
+  const [autresFraisInvest, setAutresFraisInvest] = useState(0)
+  
   const [cautionMois, setCautionMois] = useState(3)
   const [fraisPreouv, setFraisPreouv] = useState(15000)
   const [bfr, setBfr] = useState(20000)
@@ -43,7 +46,7 @@ export function RoiSimulator() {
   const [apport, setApport] = useState(80000)
   const [tauxEmprunt, setTauxEmprunt] = useState(3.5)
   const [dureeEmprunt, setDureeEmprunt] = useState(7)
-  const [decalageMois, setDecalageMois] = useState(6) // Franchise en capital
+  const [decalageMois, setDecalageMois] = useState(6)
 
   // === ÉTATS : RH (SALAIRES) ===
   const [employees, setEmployees] = useState<Employee[]>([
@@ -59,95 +62,112 @@ export function RoiSimulator() {
   // MOTEUR DE CALCUL MATHÉMATIQUE
   // ==========================================
 
-  // 1. PROJECTION DU CA
-  const caY1 = caOptiqueY1 + caAudioY1
-  const caY2 = caY1 * (1 + growthY2 / 100)
-  const caY3 = caY2 * (1 + growthY3 / 100)
-  const caY4 = caY3 * (1 + growthY4 / 100)
-  const caY5 = caY4 * (1 + growthY5 / 100)
-
-  // 2. INVESTISSEMENT & EMPRUNT (Avec différé d'amortissement)
+  // 1. INVESTISSEMENT & EMPRUNT
   const loyerMensuel = loyerAnnuel / 12
   const caution = loyerMensuel * cautionMois
-  const totalInvestissement = travaux + fraisArchi + brokers + debours + materielHorsLeasing + caution + fraisPreouv + bfr + droitEntree + stockDemarrage
+  const totalInvestissement = travaux + fraisArchi + brokers + debours + materielHorsLeasing + fraisJuridiques + autresFraisInvest + caution + fraisPreouv + bfr + droitEntree + stockDemarrage
   const montantEmprunt = Math.max(0, totalInvestissement - apport)
   
+  // Tableau d'amortissement précis (pour intérêts et capital par an avec le différé)
   const tauxMensuel = (tauxEmprunt / 100) / 12
-  const nbMoisAmortissementPlein = (dureeEmprunt * 12) - decalageMois // ex: 78 mois
-  
-  // Mensualité pleine (Capital + Intérêts) sur la durée restante
+  const nbMoisAmortissementPlein = (dureeEmprunt * 12) - decalageMois
   const mensualitePleine = tauxMensuel === 0 ? montantEmprunt / nbMoisAmortissementPlein : (montantEmprunt * tauxMensuel) / (1 - Math.pow(1 + tauxMensuel, -nbMoisAmortissementPlein))
   
-  // Pendant les 6 mois de décalage, on ne paie que les intérêts
-  const interetSeulMensuel = montantEmprunt * tauxMensuel
+  let remainingCapital = montantEmprunt
+  const yearlyInterests = [0, 0, 0, 0, 0]
+  const yearlyCapital = [0, 0, 0, 0, 0]
   
-  // Annuité Cash (Ce qui sort de la tréso)
-  const annuiteCashY1 = (decalageMois * interetSeulMensuel) + ((12 - decalageMois) * mensualitePleine)
-  const annuiteCashPleine = 12 * mensualitePleine
+  let monthIndex = 1
+  for (let y = 0; y < 5; y++) {
+    for (let m = 0; m < 12; m++) {
+      const interestThisMonth = remainingCapital * tauxMensuel
+      yearlyInterests[y] += interestThisMonth
+      
+      let capitalThisMonth = 0
+      if (monthIndex > decalageMois) {
+        capitalThisMonth = mensualitePleine - interestThisMonth
+      }
+      yearlyCapital[y] += capitalThisMonth
+      remainingCapital -= capitalThisMonth
+      monthIndex++
+    }
+  }
 
-  // 3. FRAIS ACUITIS (Variables)
-  // Royalties 1% (min 5k) + Com Nat 3% + Com Loc 3% + Frais Gen 3% + Autres Frais Gen 5%
-  // Total Variable : 14% + le 1% (soumis au min 5000€)
-  const calcFraisVariables = (ca: number) => Math.max(5000, ca * 0.01) + (ca * 0.14)
-
-  // 4. LEASING & SALAIRES
+  // Amortissement comptable (simplifié 7 ans) sur le capex
+  const dotationsAmortissements = (travaux + fraisArchi + brokers + debours + materielHorsLeasing + fraisJuridiques + autresFraisInvest + droitEntree) / 7
   const leasingAnnuel = materielLeasing / 5
   const calcSalaires = (isY1: boolean) => employees.reduce((tot, emp) => tot + ((isY1 && emp.isARE) ? 0 : (emp.netMonthly * 12) * parseFloat(emp.type)), 0)
 
-  // 5. P&L (COMPTE DE RÉSULTAT)
-  const generatePnL = (ca: number, yearIdx: number) => {
-    const isY1 = yearIdx === 1
-    const isY2 = yearIdx === 2
-    
-    const margeBrute = ca * (marge / 100)
-    
-    let loyerEffectif = loyerAnnuel
-    if (isY1) loyerEffectif -= abattementY1
-    if (isY2) loyerEffectif -= abattementY2
+  // 2. GÉNÉRATION DES DONNÉES P&L POUR LES 5 ANNÉES
+  const yearsData = []
+  let cumulCashFlow = 0
 
-    const salaires = calcSalaires(isY1)
-    const fraisVariables = calcFraisVariables(ca)
-    const totalFraisFixesEtVariables = loyerEffectif + chargesLocal + fraisVariables + leasingAnnuel + salaires
+  for (let y = 0; y < 5; y++) {
+    // Calcul de croissance CA
+    let factor = 1
+    if (y >= 1) factor *= (1 + growthY2 / 100)
+    if (y >= 2) factor *= (1 + growthY3 / 100)
+    if (y >= 3) factor *= (1 + growthY4 / 100)
+    if (y >= 4) factor *= (1 + growthY5 / 100)
 
-    const ebitda = margeBrute - totalFraisFixesEtVariables
+    const caOpt = caOptiqueHT * factor
+    const caAud = caAudioHT * factor
+    const caTot = caOpt + caAud
+    const margeBrute = caTot * (marge / 100)
 
-    // Amortissements linéaires simplifiés sur 7 ans (Capex pur)
-    const dotationsAmortissements = (travaux + fraisArchi + materielHorsLeasing + droitEntree) / 7
-    // Intérêts bancaires (simplifié P&L)
-    const interets = montantEmprunt * (tauxEmprunt / 100) * (1 - ((yearIdx-1)/dureeEmprunt)) 
+    // Charges d'exploitation Magasin
+    const personnel = y === 0 ? calcSalaires(true) : calcSalaires(false)
+    const loyerEff = loyerAnnuel - (y === 0 ? abattementY1 : (y === 1 ? abattementY2 : 0))
+    const chargesEspace = loyerEff + chargesLocal
+    const comLocal = caTot * 0.03
+    const autresFrais = caTot * 0.05
+    const fraisGen = caTot * 0.03
+    const totalFraisMagasin = personnel + chargesEspace + comLocal + leasingAnnuel + autresFrais + fraisGen
     
-    const rai = ebitda - dotationsAmortissements - interets
-    const impot = isY1 ? 0 : (rai > 0 ? rai * 0.25 : 0) // Pas d'IS en Y1, 25% ensuite
-    
-    return { margeBrute, totalFraisFixesEtVariables, ebitda, resultatNet: rai - impot, annuiteCash: isY1 ? annuiteCashY1 : annuiteCashPleine }
+    // Performance Magasin
+    const ebitdaMagasin = margeBrute - totalFraisMagasin
+    const ebitMagasin = ebitdaMagasin - dotationsAmortissements
+
+    // Redevances et Frais Preouv
+    const comNat = caTot * 0.03
+    const royalties = Math.max(5000, caTot * 0.01)
+    const fraisPreouvExce = y === 0 ? fraisPreouv : 0 // Passé en charge Y1
+
+    // Performance Société
+    const ebitdaApresFranchise = ebitdaMagasin - comNat - royalties - fraisPreouvExce
+    const ebitSte = ebitdaApresFranchise - dotationsAmortissements
+
+    // Résultat et Impôts
+    const fraisFinanciers = yearlyInterests[y]
+    const rai = ebitSte - fraisFinanciers
+    const is = y === 0 ? 0 : (rai > 0 ? rai * 0.25 : 0)
+    const resultatNet = rai - is
+
+    // Cash Flow (Trésorerie)
+    const cashFlowBrut = resultatNet + dotationsAmortissements
+    const rembCapital = yearlyCapital[y]
+    const cashFlowNet = cashFlowBrut - rembCapital
+    cumulCashFlow += cashFlowNet
+
+    // Seuil de Rentabilité (SR)
+    const tmcDecimal = (margeBrute - (comLocal + autresFrais + fraisGen + comNat + royalties)) / Math.max(1, caTot)
+    const fraisFixesCash = chargesEspace + personnel + leasingAnnuel + rembCapital + fraisFinanciers
+    const srHT = fraisFixesCash / Math.max(0.01, tmcDecimal)
+
+    yearsData.push({
+      caOpt, caAud, caTot, margeBrute, personnel, chargesEspace, comLocal, autresFrais, fraisGen, totalFraisMagasin, 
+      ebitdaMagasin, ebitMagasin, comNat, royalties, fraisPreouvExce, ebitdaApresFranchise, ebitSte, fraisFinanciers, 
+      is, resultatNet, cashFlowBrut, rembCapital, cashFlowNet, cumulCashFlow, srHT
+    })
   }
 
-  const pnlY1 = generatePnL(caY1, 1)
-  const pnlY2 = generatePnL(caY2, 2)
-  const pnlY3 = generatePnL(caY3, 3)
-  const pnlY4 = generatePnL(caY4, 4)
-  const pnlY5 = generatePnL(caY5, 5)
-
-  // 6. SEUIL DE RENTABILITÉ CASH (Point mort de trésorerie)
-  // SR = Frais Fixes Cash / Taux de Marge Contributive (Marge - Frais Variables %)
-  const calcSeuilRentabilite = (ca: number, pnl: any, isY1: boolean, isY2: boolean) => {
-    const variableCosts = calcFraisVariables(ca)
-    const tmcDecimal = (pnl.margeBrute - variableCosts) / ca // Ex: 64% - 15% = 49%
-    
-    let loyerEffectif = loyerAnnuel
-    if (isY1) loyerEffectif -= abattementY1
-    if (isY2) loyerEffectif -= abattementY2
-
-    const fraisFixesCash = loyerEffectif + chargesLocal + calcSalaires(isY1) + leasingAnnuel + pnl.annuiteCash
-    return fraisFixesCash / Math.max(0.01, tmcDecimal)
-  }
-
-  const srY1 = calcSeuilRentabilite(caY1, pnlY1, true, false)
-  const srY2 = calcSeuilRentabilite(caY2, pnlY2, false, true)
-  const srY3 = calcSeuilRentabilite(caY3, pnlY3, false, false)
-
-  // Formatage monétaire
-  const f = (val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val)
+  // TVA Moyenne Ponderée pour le Seuil de rentabilité TTC
+  const tvaMoyenne = caY1 => ((caOptiqueHT * 0.20) + (caAudioHT * 0.055)) / (caOptiqueHT + caAudioHT)
+  
+  // Formatage monétaire complet
+  const f = (val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val || 0)
+  // Formatage en Kilo-Euros (k€) pour le tableau de P&L
+  const fK = (val: number) => Math.round(val / 1000)
 
   return (
     <div className="flex flex-col gap-6 max-h-[calc(100vh-140px)] overflow-y-auto pr-2 pb-10">
@@ -158,7 +178,7 @@ export function RoiSimulator() {
           <div className="bg-primary/10 p-2.5 rounded-lg text-primary"><Calculator className="h-6 w-6" /></div>
           <div>
             <h2 className="text-xl font-bold text-foreground">Simulateur d'Investissement & ROI</h2>
-            <p className="text-sm text-muted-foreground">BP Complet : Investissement, Financement, Seuils de Rentabilité et P&L à 5 ans.</p>
+            <p className="text-sm text-muted-foreground">Business Plan complet : Seuil de Rentabilité et Compte de Résultat à 5 ans.</p>
           </div>
         </div>
         <div className="flex gap-4">
@@ -183,15 +203,44 @@ export function RoiSimulator() {
           <div className="rounded-xl border border-border bg-card p-5">
             <h3 className="font-semibold text-foreground text-sm flex items-center gap-2 border-b border-border pb-3 mb-4"><TrendingUp className="h-4 w-4 text-primary" /> 1. Prévisions CA & Marge</h3>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-5">
-              <div className="space-y-3">
-                <div><label className="text-xs text-muted-foreground mb-1 block">CA Optique Y1 (HT 20%)</label><Input type="number" value={caOptiqueY1} onChange={e => setCaOptiqueY1(Number(e.target.value))} className="text-xs font-semibold text-blue-500" /></div>
-                <div><label className="text-xs text-muted-foreground mb-1 block">CA Audio Y1 (HT 5.5%)</label><Input type="number" value={caAudioY1} onChange={e => setCaAudioY1(Number(e.target.value))} className="text-xs font-semibold text-emerald-500" /></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+              
+              <div className="space-y-4">
+                <div className="bg-blue-500/5 border border-blue-500/20 p-3 rounded-lg">
+                  <span className="text-[11px] font-bold text-blue-500 mb-2 block">CA Optique (TVA 20%)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">Montant HT</label>
+                      <Input type="number" value={Math.round(caOptiqueHT)} onChange={e => setCaOptiqueHT(Number(e.target.value))} className="text-xs font-semibold text-blue-500" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">Montant TTC</label>
+                      <Input type="number" value={Math.round(caOptiqueHT * 1.20)} onChange={e => setCaOptiqueHT(Number(e.target.value) / 1.20)} className="text-xs border-blue-500/30" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-emerald-500/5 border border-emerald-500/20 p-3 rounded-lg">
+                  <span className="text-[11px] font-bold text-emerald-500 mb-2 block">CA Audition (TVA 5.5%)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">Montant HT</label>
+                      <Input type="number" value={Math.round(caAudioHT)} onChange={e => setCaAudioHT(Number(e.target.value))} className="text-xs font-semibold text-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">Montant TTC</label>
+                      <Input type="number" value={Math.round(caAudioHT * 1.055)} onChange={e => setCaAudioHT(Number(e.target.value) / 1.055)} className="text-xs border-emerald-500/30" />
+                    </div>
+                  </div>
+                </div>
               </div>
               
-              <div className="md:col-span-2 bg-muted/20 p-4 rounded-lg border border-border flex flex-col justify-center">
-                <label className="text-xs font-bold text-foreground mb-3 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-primary"/> Marge Brute Moyenne ciblée : <span className="text-primary text-lg">{marge}%</span></label>
-                <input type="range" min="62" max="70" step="0.5" value={marge} onChange={e => setMarge(Number(e.target.value))} className="w-full accent-primary" />
+              <div className="bg-muted/20 p-4 rounded-lg border border-border flex flex-col justify-center">
+                <label className="text-xs font-bold text-foreground mb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-primary"/> Marge Brute :</span>
+                  <span className="text-primary text-lg">{marge}%</span>
+                </label>
+                <input type="range" min="62" max="70" step="0.5" value={marge} onChange={e => setMarge(Number(e.target.value))} className="w-full accent-primary mt-2" />
                 <div className="flex justify-between text-[10px] text-muted-foreground mt-1"><span>62%</span><span>66%</span><span>70%</span></div>
               </div>
             </div>
@@ -212,12 +261,14 @@ export function RoiSimulator() {
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Architecte/Pilote</label><Input type="number" value={fraisArchi} onChange={e => setFraisArchi(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Honoraires Brokers</label><Input type="number" value={brokers} onChange={e => setBrokers(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Débours Architecte</label><Input type="number" value={debours} onChange={e => setDebours(Number(e.target.value))} className="text-xs" /></div>
+              <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Juridiques</label><Input type="number" value={fraisJuridiques} onChange={e => setFraisJuridiques(Number(e.target.value))} className="text-xs border-primary/20" /></div>
+              <div><label className="text-[11px] text-muted-foreground mb-1 block">Autres Frais Invest.</label><Input type="number" value={autresFraisInvest} onChange={e => setAutresFraisInvest(Number(e.target.value))} className="text-xs border-primary/20" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Matériel (Hors Leasing)</label><Input type="number" value={materielHorsLeasing} onChange={e => setMaterielHorsLeasing(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Stock de démarrage</label><Input type="number" value={stockDemarrage} onChange={e => setStockDemarrage(Number(e.target.value))} className="text-xs border-amber-500/30" /></div>
+              <div><label className="text-[11px] text-muted-foreground mb-1 block">Dépôt garantie (Nb mois)</label><Input type="number" value={cautionMois} onChange={e => setCautionMois(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Frais Pré-Ouverture</label><Input type="number" value={fraisPreouv} onChange={e => setFraisPreouv(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">Droit d'entrée Franchise</label><Input type="number" value={droitEntree} onChange={e => setDroitEntree(Number(e.target.value))} className="text-xs" /></div>
               <div><label className="text-[11px] text-muted-foreground mb-1 block">BFR (Trésorerie départ)</label><Input type="number" value={bfr} onChange={e => setBfr(Number(e.target.value))} className="text-xs" /></div>
-              <div><label className="text-[11px] text-muted-foreground mb-1 block">Dépôt garantie (Nb mois)</label><Input type="number" value={cautionMois} onChange={e => setCautionMois(Number(e.target.value))} className="text-xs" /></div>
             </div>
           </div>
 
@@ -280,57 +331,101 @@ export function RoiSimulator() {
         {/* COLONNE DROITE : LES RÉSULTATS (5 colonnes) */}
         <div className="xl:col-span-5 flex flex-col gap-5">
           
-          {/* ENCART SEUIL RENTABILITÉ */}
+          {/* ENCART SEUIL RENTABILITÉ DÉTAILLÉ */}
           <div className="rounded-xl border-2 border-emerald-500/20 bg-card shadow-lg overflow-hidden shrink-0">
             <div className="bg-emerald-500/10 px-5 py-4 border-b border-emerald-500/20">
-              <h3 className="font-bold text-emerald-500 flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Seuils de Rentabilité</h3>
+              <h3 className="font-bold text-emerald-500 flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Seuils de Rentabilité (SR)</h3>
               <p className="text-[11px] text-muted-foreground mt-1">Chiffre d'affaires à atteindre pour couvrir l'ensemble des charges cash et annuités bancaires.</p>
             </div>
             <div className="p-4 space-y-3">
-              <div className="flex justify-between items-center bg-background p-3 rounded border border-border">
-                <span className="font-semibold text-sm">Année 1</span>
-                <span className="text-lg font-bold text-foreground">{f(srY1)}</span>
-              </div>
-              <div className="flex justify-between items-center bg-background p-3 rounded border border-border">
-                <span className="font-semibold text-sm">Année 2</span>
-                <span className="text-lg font-bold text-foreground">{f(srY2)}</span>
-              </div>
-              <div className="flex justify-between items-center bg-background p-3 rounded border border-border">
-                <span className="font-semibold text-sm">Année 3</span>
-                <span className="text-lg font-bold text-foreground">{f(srY3)}</span>
-              </div>
+              {[1, 2, 3].map((y) => {
+                const sr = yearsData[y-1].srHT
+                const srMensuelHT = sr / 12
+                const srMensuelTTC = srMensuelHT * (1 + tvaMoyenne())
+                return (
+                  <div key={y} className="bg-background p-3 rounded border border-border flex flex-col gap-2">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-sm">Année {y}</span>
+                      <span className="text-lg font-bold text-foreground text-emerald-500">{f(sr)} <span className="text-[10px] font-normal text-muted-foreground uppercase">Annuel HT</span></span>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] text-muted-foreground bg-muted/30 px-2 py-1.5 rounded">
+                      <span className="font-medium">Objectif Mensuel :</span>
+                      <div className="flex gap-3">
+                        <span><b className="text-foreground">{f(srMensuelHT)}</b> HT</span>
+                        <span className="border-l border-border pl-3"><b className="text-foreground">{f(srMensuelTTC)}</b> TTC</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
-          {/* ENCART RENTABILITÉ & ROI */}
+          {/* ENCART RENTABILITÉ & ROI DÉTAILLÉ TYPE EXCEL */}
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm flex-1 flex flex-col">
-            <h3 className="font-bold text-foreground flex items-center gap-2 border-b border-border pb-3 mb-4"><FileText className="h-5 w-5 text-primary" /> Synthèse Rentabilité (P&L à 5 ans)</h3>
+            <h3 className="font-bold text-foreground flex items-center gap-2 border-b border-border pb-3 mb-4"><FileSpreadsheet className="h-5 w-5 text-primary" /> Synthèse Rentabilité (P&L en k€)</h3>
             
             <div className="overflow-x-auto pb-4">
               <table className="w-full text-[11px] text-left">
                 <thead>
-                  <tr className="text-muted-foreground border-b border-border">
-                    <th className="pb-2 w-32">Indicateur</th>
-                    <th className="pb-2 text-right">Y1</th>
-                    <th className="pb-2 text-right">Y2</th>
-                    <th className="pb-2 text-right">Y3</th>
-                    <th className="pb-2 text-right">Y4</th>
-                    <th className="pb-2 text-right">Y5</th>
+                  <tr className="text-muted-foreground border-b-2 border-border">
+                    <th className="pb-2 min-w-[160px]">Compte de résultat</th>
+                    <th className="pb-2 text-right w-12">Y1</th>
+                    <th className="pb-2 text-right w-12">Y2</th>
+                    <th className="pb-2 text-right w-12">Y3</th>
+                    <th className="pb-2 text-right w-12">Y4</th>
+                    <th className="pb-2 text-right w-12">Y5</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
-                  <tr><td className="py-2 text-muted-foreground">C.A. Total HT</td><td className="py-2 text-right font-medium">{f(caY1)}</td><td className="py-2 text-right font-medium">{f(caY2)}</td><td className="py-2 text-right font-medium">{f(caY3)}</td><td className="py-2 text-right font-medium">{f(caY4)}</td><td className="py-2 text-right font-medium">{f(caY5)}</td></tr>
-                  <tr><td className="py-2 text-muted-foreground">Marge Brute</td><td className="py-2 text-right text-emerald-500">{f(pnlY1.margeBrute)}</td><td className="py-2 text-right text-emerald-500">{f(pnlY2.margeBrute)}</td><td className="py-2 text-right text-emerald-500">{f(pnlY3.margeBrute)}</td><td className="py-2 text-right text-emerald-500">{f(pnlY4.margeBrute)}</td><td className="py-2 text-right text-emerald-500">{f(pnlY5.margeBrute)}</td></tr>
-                  <tr className="bg-muted/10"><td className="py-2 font-bold pl-1">EBITDA</td><td className="py-2 text-right font-bold">{f(pnlY1.ebitda)}</td><td className="py-2 text-right font-bold">{f(pnlY2.ebitda)}</td><td className="py-2 text-right font-bold">{f(pnlY3.ebitda)}</td><td className="py-2 text-right font-bold">{f(pnlY4.ebitda)}</td><td className="py-2 text-right font-bold">{f(pnlY5.ebitda)}</td></tr>
-                  <tr><td className="py-2 text-muted-foreground">Sortie Cash Emprunt</td><td className="py-2 text-right text-amber-500">-{f(pnlY1.annuiteCash)}</td><td className="py-2 text-right text-amber-500">-{f(pnlY2.annuiteCash)}</td><td className="py-2 text-right text-amber-500">-{f(pnlY3.annuiteCash)}</td><td className="py-2 text-right text-amber-500">-{f(pnlY4.annuiteCash)}</td><td className="py-2 text-right text-amber-500">-{f(pnlY5.annuiteCash)}</td></tr>
-                  <tr><td className="py-2 text-muted-foreground font-bold">RÉSULTAT NET</td><td className={`py-2 text-right font-bold ${pnlY1.resultatNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{f(pnlY1.resultatNet)}</td><td className={`py-2 text-right font-bold ${pnlY2.resultatNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{f(pnlY2.resultatNet)}</td><td className={`py-2 text-right font-bold ${pnlY3.resultatNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{f(pnlY3.resultatNet)}</td><td className={`py-2 text-right font-bold ${pnlY4.resultatNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{f(pnlY4.resultatNet)}</td><td className={`py-2 text-right font-bold ${pnlY5.resultatNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{f(pnlY5.resultatNet)}</td></tr>
+                <tbody className="divide-y divide-border font-medium">
+                  {/* REVENUS */}
+                  <tr className="bg-muted/10"><td colSpan={6} className="py-1 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Revenus</td></tr>
+                  <tr><td className="py-1 text-muted-foreground">Optique</td><td className="py-1 text-right">{fK(yearsData[0].caOpt)}</td><td className="py-1 text-right">{fK(yearsData[1].caOpt)}</td><td className="py-1 text-right">{fK(yearsData[2].caOpt)}</td><td className="py-1 text-right">{fK(yearsData[3].caOpt)}</td><td className="py-1 text-right">{fK(yearsData[4].caOpt)}</td></tr>
+                  <tr><td className="py-1 text-muted-foreground">Audition</td><td className="py-1 text-right">{fK(yearsData[0].caAud)}</td><td className="py-1 text-right">{fK(yearsData[1].caAud)}</td><td className="py-1 text-right">{fK(yearsData[2].caAud)}</td><td className="py-1 text-right">{fK(yearsData[3].caAud)}</td><td className="py-1 text-right">{fK(yearsData[4].caAud)}</td></tr>
+                  <tr className="bg-primary/5 font-bold"><td className="py-1.5 pl-1 text-primary">CA NET EN K€ HT</td><td className="py-1.5 text-right">{fK(yearsData[0].caTot)}</td><td className="py-1.5 text-right">{fK(yearsData[1].caTot)}</td><td className="py-1.5 text-right">{fK(yearsData[2].caTot)}</td><td className="py-1.5 text-right">{fK(yearsData[3].caTot)}</td><td className="py-1.5 text-right">{fK(yearsData[4].caTot)}</td></tr>
+                  <tr className="font-bold border-b-2 border-border"><td className="py-1.5 text-foreground">MARGE BRUTE</td><td className="py-1.5 text-right">{fK(yearsData[0].margeBrute)}</td><td className="py-1.5 text-right">{fK(yearsData[1].margeBrute)}</td><td className="py-1.5 text-right">{fK(yearsData[2].margeBrute)}</td><td className="py-1.5 text-right">{fK(yearsData[3].margeBrute)}</td><td className="py-1.5 text-right">{fK(yearsData[4].margeBrute)}</td></tr>
+                  
+                  {/* FRAIS MAGASIN */}
+                  <tr className="bg-muted/10"><td colSpan={6} className="py-1 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Frais Magasin</td></tr>
+                  <tr className="text-red-400"><td className="py-1">Frais de personnel et charges</td><td className="py-1 text-right">-{fK(yearsData[0].personnel)}</td><td className="py-1 text-right">-{fK(yearsData[1].personnel)}</td><td className="py-1 text-right">-{fK(yearsData[2].personnel)}</td><td className="py-1 text-right">-{fK(yearsData[3].personnel)}</td><td className="py-1 text-right">-{fK(yearsData[4].personnel)}</td></tr>
+                  <tr className="text-red-400"><td className="py-1">Charges d'espace (Loyer inc.)</td><td className="py-1 text-right">-{fK(yearsData[0].chargesEspace)}</td><td className="py-1 text-right">-{fK(yearsData[1].chargesEspace)}</td><td className="py-1 text-right">-{fK(yearsData[2].chargesEspace)}</td><td className="py-1 text-right">-{fK(yearsData[3].chargesEspace)}</td><td className="py-1 text-right">-{fK(yearsData[4].chargesEspace)}</td></tr>
+                  <tr className="text-red-400"><td className="py-1">Frais de communication (Loc)</td><td className="py-1 text-right">-{fK(yearsData[0].comLocal)}</td><td className="py-1 text-right">-{fK(yearsData[1].comLocal)}</td><td className="py-1 text-right">-{fK(yearsData[2].comLocal)}</td><td className="py-1 text-right">-{fK(yearsData[3].comLocal)}</td><td className="py-1 text-right">-{fK(yearsData[4].comLocal)}</td></tr>
+                  <tr className="text-red-400"><td className="py-1">Leasing</td><td className="py-1 text-right">-{fK(yearsData[0].leasing)}</td><td className="py-1 text-right">-{fK(yearsData[1].leasing)}</td><td className="py-1 text-right">-{fK(yearsData[2].leasing)}</td><td className="py-1 text-right">-{fK(yearsData[3].leasing)}</td><td className="py-1 text-right">-{fK(yearsData[4].leasing)}</td></tr>
+                  <tr className="text-red-400"><td className="py-1">Autres frais magasins (5%)</td><td className="py-1 text-right">-{fK(yearsData[0].autresFrais)}</td><td className="py-1 text-right">-{fK(yearsData[1].autresFrais)}</td><td className="py-1 text-right">-{fK(yearsData[2].autresFrais)}</td><td className="py-1 text-right">-{fK(yearsData[3].autresFrais)}</td><td className="py-1 text-right">-{fK(yearsData[4].autresFrais)}</td></tr>
+                  <tr className="text-red-400 border-b-2 border-border"><td className="py-1">Frais généraux (3%)</td><td className="py-1 text-right">-{fK(yearsData[0].fraisGen)}</td><td className="py-1 text-right">-{fK(yearsData[1].fraisGen)}</td><td className="py-1 text-right">-{fK(yearsData[2].fraisGen)}</td><td className="py-1 text-right">-{fK(yearsData[3].fraisGen)}</td><td className="py-1 text-right">-{fK(yearsData[4].fraisGen)}</td></tr>
+                  
+                  {/* PERFORMANCE MAGASIN */}
+                  <tr className="bg-emerald-500/10 font-bold"><td className="py-1.5 pl-1 text-emerald-600">EBITDA Magasin</td><td className="py-1.5 text-right">{fK(yearsData[0].ebitdaMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[1].ebitdaMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[2].ebitdaMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[3].ebitdaMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[4].ebitdaMagasin)}</td></tr>
+                  <tr className="text-muted-foreground"><td className="py-1">Amortissements</td><td className="py-1 text-right">-{fK(dotationsAmortissements)}</td><td className="py-1 text-right">-{fK(dotationsAmortissements)}</td><td className="py-1 text-right">-{fK(dotationsAmortissements)}</td><td className="py-1 text-right">-{fK(dotationsAmortissements)}</td><td className="py-1 text-right">-{fK(dotationsAmortissements)}</td></tr>
+                  <tr className="font-bold border-b-2 border-border"><td className="py-1.5 text-foreground">Résultat d'exploit. (EBIT)</td><td className="py-1.5 text-right">{fK(yearsData[0].ebitMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[1].ebitMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[2].ebitMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[3].ebitMagasin)}</td><td className="py-1.5 text-right">{fK(yearsData[4].ebitMagasin)}</td></tr>
+
+                  {/* REDEVANCES */}
+                  <tr className="bg-muted/10"><td colSpan={6} className="py-1 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Réseau & Franchise</td></tr>
+                  <tr className="text-amber-500"><td className="py-1">Communication nationale</td><td className="py-1 text-right">-{fK(yearsData[0].comNat)}</td><td className="py-1 text-right">-{fK(yearsData[1].comNat)}</td><td className="py-1 text-right">-{fK(yearsData[2].comNat)}</td><td className="py-1 text-right">-{fK(yearsData[3].comNat)}</td><td className="py-1 text-right">-{fK(yearsData[4].comNat)}</td></tr>
+                  <tr className="text-amber-500"><td className="py-1">Cotisation annuelle</td><td className="py-1 text-right">-{fK(yearsData[0].royalties)}</td><td className="py-1 text-right">-{fK(yearsData[1].royalties)}</td><td className="py-1 text-right">-{fK(yearsData[2].royalties)}</td><td className="py-1 text-right">-{fK(yearsData[3].royalties)}</td><td className="py-1 text-right">-{fK(yearsData[4].royalties)}</td></tr>
+                  <tr className="text-amber-500"><td className="py-1">Frais de préouverture exc.</td><td className="py-1 text-right">-{fK(yearsData[0].fraisPreouvExce)}</td><td className="py-1 text-right">-0</td><td className="py-1 text-right">-0</td><td className="py-1 text-right">-0</td><td className="py-1 text-right">-0</td></tr>
+                  
+                  {/* PERFORMANCE STE */}
+                  <tr className="bg-primary/10 font-bold border-t-2 border-border"><td className="py-1.5 pl-1 text-primary">EBITDA après Franchise</td><td className="py-1.5 text-right">{fK(yearsData[0].ebitdaApresFranchise)}</td><td className="py-1.5 text-right">{fK(yearsData[1].ebitdaApresFranchise)}</td><td className="py-1.5 text-right">{fK(yearsData[2].ebitdaApresFranchise)}</td><td className="py-1.5 text-right">{fK(yearsData[3].ebitdaApresFranchise)}</td><td className="py-1.5 text-right">{fK(yearsData[4].ebitdaApresFranchise)}</td></tr>
+                  <tr className="font-bold"><td className="py-1 text-foreground">EBIT Société</td><td className="py-1 text-right">{fK(yearsData[0].ebitSte)}</td><td className="py-1 text-right">{fK(yearsData[1].ebitSte)}</td><td className="py-1 text-right">{fK(yearsData[2].ebitSte)}</td><td className="py-1 text-right">{fK(yearsData[3].ebitSte)}</td><td className="py-1 text-right">{fK(yearsData[4].ebitSte)}</td></tr>
+                  
+                  <tr className="text-red-400"><td className="py-1">Frais Financiers (Intérêts)</td><td className="py-1 text-right">-{fK(yearsData[0].fraisFinanciers)}</td><td className="py-1 text-right">-{fK(yearsData[1].fraisFinanciers)}</td><td className="py-1 text-right">-{fK(yearsData[2].fraisFinanciers)}</td><td className="py-1 text-right">-{fK(yearsData[3].fraisFinanciers)}</td><td className="py-1 text-right">-{fK(yearsData[4].fraisFinanciers)}</td></tr>
+                  <tr className="text-red-400 border-b-2 border-border"><td className="py-1">Impôts (IS)</td><td className="py-1 text-right">-{fK(yearsData[0].is)}</td><td className="py-1 text-right">-{fK(yearsData[1].is)}</td><td className="py-1 text-right">-{fK(yearsData[2].is)}</td><td className="py-1 text-right">-{fK(yearsData[3].is)}</td><td className="py-1 text-right">-{fK(yearsData[4].is)}</td></tr>
+                  <tr className="bg-muted/30 font-bold text-foreground"><td className="py-2 pl-1">RÉSULTAT NET</td><td className="py-2 text-right">{fK(yearsData[0].resultatNet)}</td><td className="py-2 text-right">{fK(yearsData[1].resultatNet)}</td><td className="py-2 text-right">{fK(yearsData[2].resultatNet)}</td><td className="py-2 text-right">{fK(yearsData[3].resultatNet)}</td><td className="py-2 text-right">{fK(yearsData[4].resultatNet)}</td></tr>
+                  
+                  {/* CASH FLOW */}
+                  <tr className="bg-muted/10"><td colSpan={6} className="py-1 text-[10px] text-muted-foreground uppercase font-bold tracking-wider border-t border-border">Trésorerie (Cash Flow)</td></tr>
+                  <tr className="font-bold"><td className="py-1 text-foreground">Cash flow brut (CAF)</td><td className="py-1 text-right">{fK(yearsData[0].cashFlowBrut)}</td><td className="py-1 text-right">{fK(yearsData[1].cashFlowBrut)}</td><td className="py-1 text-right">{fK(yearsData[2].cashFlowBrut)}</td><td className="py-1 text-right">{fK(yearsData[3].cashFlowBrut)}</td><td className="py-1 text-right">{fK(yearsData[4].cashFlowBrut)}</td></tr>
+                  <tr className="text-amber-500 border-b border-border"><td className="py-1">Remboursement emprunt</td><td className="py-1 text-right">-{fK(yearsData[0].rembCapital)}</td><td className="py-1 text-right">-{fK(yearsData[1].rembCapital)}</td><td className="py-1 text-right">-{fK(yearsData[2].rembCapital)}</td><td className="py-1 text-right">-{fK(yearsData[3].rembCapital)}</td><td className="py-1 text-right">-{fK(yearsData[4].rembCapital)}</td></tr>
+                  <tr className="font-bold bg-background"><td className="py-2 text-foreground">CASH FLOW NET</td><td className={`py-2 text-right ${yearsData[0].cashFlowNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[0].cashFlowNet)}</td><td className={`py-2 text-right ${yearsData[1].cashFlowNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[1].cashFlowNet)}</td><td className={`py-2 text-right ${yearsData[2].cashFlowNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[2].cashFlowNet)}</td><td className={`py-2 text-right ${yearsData[3].cashFlowNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[3].cashFlowNet)}</td><td className={`py-2 text-right ${yearsData[4].cashFlowNet < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[4].cashFlowNet)}</td></tr>
+                  <tr className="font-bold bg-muted/20 border-b-2 border-border"><td className="py-2 text-foreground">CASH FLOW CUMULÉ</td><td className={`py-2 text-right ${yearsData[0].cumulCashFlow < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[0].cumulCashFlow)}</td><td className={`py-2 text-right ${yearsData[1].cumulCashFlow < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[1].cumulCashFlow)}</td><td className={`py-2 text-right ${yearsData[2].cumulCashFlow < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[2].cumulCashFlow)}</td><td className={`py-2 text-right ${yearsData[3].cumulCashFlow < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[3].cumulCashFlow)}</td><td className={`py-2 text-right ${yearsData[4].cumulCashFlow < 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fK(yearsData[4].cumulCashFlow)}</td></tr>
                 </tbody>
               </table>
             </div>
 
             {/* METRICS FINALES ROI */}
             <div className="bg-primary/5 rounded-lg p-4 border border-primary/20 mt-auto">
-              <h4 className="text-sm font-bold text-primary mb-3">Analyse du R.O.I (Retour sur Apport)</h4>
+              <h4 className="text-sm font-bold text-primary mb-3">Analyse du R.O.I (Retour sur Apport en 5 ans)</h4>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Apport Personnel de départ</span>
@@ -339,13 +434,13 @@ export function RoiSimulator() {
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Bénéfice Net Cumulé (5 ans)</span>
                   <span className="text-sm font-bold text-emerald-500">
-                    {f(pnlY1.resultatNet + pnlY2.resultatNet + pnlY3.resultatNet + pnlY4.resultatNet + pnlY5.resultatNet)}
+                    {f(yearsData.reduce((acc, curr) => acc + curr.resultatNet, 0))}
                   </span>
                 </div>
                 <div className="pt-2 border-t border-primary/10 flex justify-between items-center">
                   <span className="text-xs font-bold text-foreground">R.O.I à 5 ans</span>
                   <Badge className="bg-primary hover:bg-primary text-white text-sm">
-                    {apport > 0 ? (((pnlY1.resultatNet + pnlY2.resultatNet + pnlY3.resultatNet + pnlY4.resultatNet + pnlY5.resultatNet) / apport) * 100).toFixed(1) : 0} %
+                    {apport > 0 ? ((yearsData.reduce((acc, curr) => acc + curr.resultatNet, 0) / apport) * 100).toFixed(1) : 0} %
                   </Badge>
                 </div>
               </div>
