@@ -1,16 +1,16 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink, Send, Users, UserCircle, FileSpreadsheet } from "lucide-react"
+import React, { useEffect, useState } from "react"
+import { Eye, EyeOff, Archive, ArchiveRestore, Mail, Phone, MapPin, Pencil, Trash2, Plus, X, Map, Download, BarChart, CalendarPlus, ClipboardList, CheckCircle, Circle, ExternalLink, Send, Users, UserCircle, FileSpreadsheet, Building2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 import { formatEuro } from "@/lib/crm-data"
 
-const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris"]
+const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris", "Stéphane CEZAR"]
 
-type Prospect = { id: number; name: string; ville: string; telephone: string; email: string; apport: number; statut: string; actif: boolean; provenance: string; created_at: string; est_franchise?: boolean; developpeur_assigne?: string }
+type Prospect = { id: number; name: string; ville: string; telephone: string; email: string; apport: number; statut: string; actif: boolean; provenance: string; created_at: string; est_franchise?: boolean; developpeur_assigne?: string; raison_statut?: string }
 type Mission = { id: number; title: string; description: string; echeance: string; terminee: boolean; prospect_id: number; assignes: string[] }
 type DocumentModel = { id: number; titre: string; url_fichier: string; modele_email: string }
 
@@ -54,10 +54,27 @@ export function ProspectsPipeline() {
   }
 
   const handleChangeStatus = async (id: number, newStatus: string) => {
+    let raison = null;
+    
+    // Demander la raison si passage en Perdu ou Non qualifié
+    if (newStatus === "Non qualifié" || newStatus === "Perdu") {
+      raison = prompt(`Quelle est la raison pour le passage en statut "${newStatus}" ? (Optionnel)`)
+    }
+
     const isInactive = newStatus === "Non qualifié" || newStatus === "Perdu"
-    const payload = { statut: newStatus, actif: !isInactive }
+    const payload: any = { statut: newStatus, actif: !isInactive }
+    
+    if (raison !== null) {
+      payload.raison_statut = raison
+    }
+
     const { error } = await supabase.from("prospects").update(payload).eq("id", id)
-    if (!error) setProspects(prospects.map(p => p.id === id ? { ...p, ...payload } : p))
+    
+    if (!error) {
+      setProspects(prospects.map(p => p.id === id ? { ...p, ...payload } : p))
+    } else {
+      alert("Erreur de mise à jour. Avez-vous bien créé la colonne raison_statut dans Supabase ?")
+    }
   }
 
   const handleAssignDev = async (id: number, devName: string) => {
@@ -68,29 +85,31 @@ export function ProspectsPipeline() {
   const handlePasserEnRecherche = async (p: Prospect) => {
     const villes = prompt(`Dans quelle(s) ville(s) ${p.name} recherche-t-il un local ?`, p.ville || "")
     if (villes === null) return 
-    setProspects(current => current.map(prov => prov.id === p.id ? { ...prov, statut: "Validé", actif: true } : prov))
+    
     const { error: emplError } = await supabase.from("emplacements").insert([{ prospect_id: p.id, villes_recherchees: villes, statut_recherche: "en_recherche", type_zone: null, surface_souhaitee_m2: 0 }])
-    if (emplError) { alert("Erreur : " + emplError.message); fetchProspects(); return }
+    
+    if (emplError) { 
+      alert("Erreur lors du transfert : " + emplError.message); 
+      return 
+    }
+    
+    // Mettre à jour le statut en validé
     await supabase.from("prospects").update({ statut: "Validé", actif: true }).eq("id", p.id)
+    fetchProspects()
+    alert(`La recherche d'emplacement pour ${p.name} a bien été créée dans l'onglet Emplacements !`)
   }
 
-  // === CORRECTION : SUPPRESSION PROPRE SANS FANTÔMES ===
   const handleDelete = async (id: number) => {
     if (!confirm("Supprimer définitivement ce prospect ? (Cela supprimera aussi son historique, ses missions et ses dossiers)")) return
     
-    // 1. On nettoie toutes les dépendances
     await supabase.from("missions").delete().eq("prospect_id", id)
     await supabase.from("emplacements").delete().eq("prospect_id", id)
     await supabase.from("dossiers").delete().eq("prospect_id", id)
     
-    // 2. On supprime enfin le prospect
     const { error } = await supabase.from("prospects").delete().eq("id", id)
     
-    if (error) {
-      alert("Erreur lors de la suppression : " + error.message)
-    } else {
-      fetchProspects()
-    }
+    if (error) alert("Erreur lors de la suppression : " + error.message)
+    else fetchProspects()
   }
 
   const handleEdit = (p: Prospect) => { setFormData(p); setEditingId(p.id); setShowModal(true) }
@@ -155,11 +174,8 @@ export function ProspectsPipeline() {
       assignes: missionData.assignes
     }])
     
-    if (!error) {
-      setShowMissionModal(false)
-    } else {
-      alert("La mission n'a pas pu être sauvegardée dans le CRM : " + error.message)
-    }
+    if (!error) setShowMissionModal(false)
+    else alert("La mission n'a pas pu être sauvegardée : " + error.message)
   }
 
   const handleOpenHistory = async (p: Prospect) => {
@@ -193,11 +209,11 @@ export function ProspectsPipeline() {
 
     const prenom = selectedProspect.name.split(' ')[0]
     const corpsEmail = doc.modele_email.replace(/\[Prénom\]/gi, prenom).replace(/\[Lien\]/gi, doc.url_fichier)
+    const subject = `Document Acuitis : ${doc.titre}`
 
-    const subject = encodeURIComponent(`Document Acuitis : ${doc.titre}`)
-    const mailtoLink = `mailto:${selectedProspect.email || ""}?subject=${subject}&body=${corpsEmail}`
-    
-    window.open(mailtoLink, '_blank')
+    // UTILISATION DE GMAIL WEB PAR DÉFAUT
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(selectedProspect.email || "")}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(corpsEmail)}`
+    window.open(gmailUrl, '_blank')
 
     await supabase.from('missions').insert([{ 
       title: `[Document envoyé] ${doc.titre}`, 
@@ -210,23 +226,17 @@ export function ProspectsPipeline() {
     setShowDocModal(false)
   }
 
-  const handleExportData = () => { /* Code existant */ }
-  const handleExportKPI = () => { /* Code existant */ }
+  const handleExportData = () => { /* Optionnel */ }
+  const handleExportKPI = () => { /* Optionnel */ }
 
   const handleExportReunion = async () => {
     const { data: dossiers } = await supabase.from("dossiers").select("*")
-
-    const prospectsReunion = prospects.filter(p => 
-      p.statut === "RDV" || 
-      p.statut === "Validé" || 
-      p.est_franchise === true
-    )
+    const prospectsReunion = prospects.filter(p => p.statut === "RDV" || p.statut === "Validé" || p.est_franchise === true)
 
     const headers = ["Porteur de projet", "Ville cherchée / Local", "Développeur", "Statut actuel", "Timing (Date prévue)", "Commentaires"]
     
     const rows = prospectsReunion.map(p => {
       const dossier = dossiers?.find(d => d.prospect_id === p.id)
-      
       const nom = p.name || ""
       const ville = dossier?.adresse_local || p.ville || "Recherche en cours"
       const dev = p.developpeur_assigne || "Non assigné"
@@ -239,24 +249,10 @@ export function ProspectsPipeline() {
       const timing = dossier?.date_ouverture_prevue ? new Date(dossier.date_ouverture_prevue).toLocaleDateString("fr-FR") : "À définir"
       const commentaires = dossier?.commentaire || ""
 
-      return [
-        `"${nom}"`,
-        `"${ville}"`,
-        `"${dev}"`,
-        `"${statut}"`,
-        `"${timing}"`,
-        `"${commentaires.replace(/"/g, '""').replace(/\n/g, ' ')}"`
-      ]
+      return [`"${nom}"`, `"${ville}"`, `"${dev}"`, `"${statut}"`, `"${timing}"`, `"${commentaires.replace(/"/g, '""').replace(/\n/g, ' ')}"`]
     })
 
-    const csvLines = [
-      "TABLEAU QUALITATIF - RÉUNION DÉVELOPPEMENT",
-      `Édité le;${new Date().toLocaleDateString("fr-FR")}`,
-      "",
-      headers.join(";"),
-      ...rows.map(r => r.join(";"))
-    ]
-
+    const csvLines = ["TABLEAU QUALITATIF - RÉUNION DÉVELOPPEMENT", `Édité le;${new Date().toLocaleDateString("fr-FR")}`, "", headers.join(";"), ...rows.map(r => r.join(";"))]
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvLines.join("\n")
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement("a"); link.href = encodedUri; link.download = `tableau_reunion_dev_${new Date().toISOString().slice(0, 10)}.csv`
@@ -279,11 +275,9 @@ export function ProspectsPipeline() {
           <Button variant="outline" size="sm" onClick={handleExportData} className="border-border bg-muted/20 text-xs hidden md:flex">
             <Download className="mr-2 h-3.5 w-3.5" /> Données Brutes
           </Button>
-
           <Button variant="outline" size="sm" onClick={handleExportKPI} className="border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold hidden md:flex">
             <BarChart className="mr-2 h-3.5 w-3.5" /> Rapport KPI
           </Button>
-
           <Button variant="outline" size="sm" onClick={handleExportReunion} className="border-blue-500/30 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 text-xs font-bold">
             <FileSpreadsheet className="mr-2 h-3.5 w-3.5" /> Tableau Réunion Dév.
           </Button>
@@ -299,100 +293,153 @@ export function ProspectsPipeline() {
         </div>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-4 h-full">
-        {COLUMNS.map(column => {
-          const columnProspects = displayedProspects.filter(p => (p.statut || "Nouveau") === column)
-          return (
-            <div key={column} className={`flex-shrink-0 w-80 flex flex-col gap-3 rounded-xl p-3 border border-border ${column === 'Validé' ? 'bg-emerald-900/10 border-emerald-500/20' : 'bg-muted/20'}`}>
-              <div className="flex items-center justify-between px-1">
-                <h3 className={`font-semibold text-sm ${column === 'Validé' ? 'text-emerald-400' : 'text-foreground'}`}>{column}</h3>
-                <Badge variant="secondary" className={column === 'Validé' ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : ''}>{columnProspects.length}</Badge>
-              </div>
+      {/* TABLEAU VERTICAL TYPE EXCEL */}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm h-full pb-10">
+        <table className="w-full text-left text-sm border-collapse">
+          <thead>
+            <tr className="bg-muted/50 border-b border-border text-xs text-muted-foreground uppercase tracking-wider">
+              <th className="p-4 font-semibold">Candidat</th>
+              <th className="p-4 font-semibold">Contact</th>
+              <th className="p-4 font-semibold">Projet</th>
+              <th className="p-4 font-semibold w-36">Développeur</th>
+              <th className="p-4 font-semibold w-40">Statut</th>
+              <th className="p-4 font-semibold text-right w-56">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {COLUMNS.map(column => {
+              const columnProspects = displayedProspects.filter(p => (p.statut || "Nouveau") === column)
+              if (columnProspects.length === 0) return null
 
-              <div className="flex flex-col gap-3 overflow-y-auto pr-1">
-                {columnProspects.map(p => (
-                  <div key={p.id} className={`bg-card rounded-lg p-3 border shadow-sm flex flex-col gap-2 transition hover:border-primary/50 ${p.actif === false ? 'border-dashed border-muted-foreground/30 opacity-70' : 'border-border'} ${p.statut === 'Validé' ? 'border-emerald-500/30' : ''}`}>
-                    
-                    <div className="flex justify-between items-start">
-                      <div className="flex flex-col items-start gap-1">
-                        <div className="font-bold text-sm text-foreground leading-tight cursor-pointer hover:text-primary hover:underline transition-colors" onClick={() => handleOpenHistory(p)}>
-                          {p.name}
-                        </div>
-                        <div className="flex gap-1 flex-wrap mt-0.5">
-                          {p.est_franchise && (
-                            <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] px-1.5 py-0 uppercase tracking-wider">👑 Franchisé</Badge>
-                          )}
-                          {p.developpeur_assigne && (
-                            <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[9px] px-1.5 py-0 flex items-center gap-1">
-                              <UserCircle className="h-2.5 w-2.5" /> {p.developpeur_assigne.split(' ')[0]}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
+              // Couleurs selon le statut pour imiter Excel
+              let bgHeaderClass = "bg-muted/30 text-foreground"
+              if (column === "Nouveau") bgHeaderClass = "bg-blue-500/10 text-blue-500"
+              if (column === "Contacté") bgHeaderClass = "bg-amber-500/10 text-amber-500"
+              if (column === "RDV") bgHeaderClass = "bg-purple-500/10 text-purple-500"
+              if (column === "Validé") bgHeaderClass = "bg-emerald-500/10 text-emerald-500"
+              if (column === "Non qualifié" || column === "Perdu") bgHeaderClass = "bg-red-500/10 text-red-500"
 
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={() => handleToggleActif(p)} className={`p-1 rounded transition ${p.actif === false ? 'text-emerald-400 hover:bg-emerald-500/20' : 'text-muted-foreground hover:text-amber-400 hover:bg-amber-500/20'}`}>
-                          {p.actif === false ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    </div>
+              return (
+                <React.Fragment key={column}>
+                  {/* EN-TÊTE DE SECTION */}
+                  <tr className={`border-b border-border ${bgHeaderClass}`}>
+                    <td colSpan={6} className="p-2 px-4 font-bold text-xs uppercase tracking-wider">
+                      {column} <Badge variant="secondary" className="ml-2 bg-background/50">{columnProspects.length}</Badge>
+                    </td>
+                  </tr>
 
-                    <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mb-1 mt-1">{p.provenance || "Autre"}</div>
-                    
-                    <div className="text-xs text-muted-foreground flex flex-col gap-1 mt-0.5">
-                      {p.ville && <div className="flex items-center gap-1.5"><MapPin className="h-3 w-3" /> {p.ville}</div>}
-                      {p.telephone && <div className="flex items-center gap-1.5"><Phone className="h-3 w-3" /> {p.telephone}</div>}
-                      {p.email && <div className="flex items-center gap-1.5 truncate" title={p.email}><Mail className="h-3 w-3 shrink-0" /> {p.email}</div>}
-                    </div>
-
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
-                      <select 
-                        className="text-[9px] font-semibold bg-transparent border-none outline-none text-muted-foreground hover:text-primary cursor-pointer w-20 truncate" 
-                        value={p.developpeur_assigne || ""} 
-                        onChange={(e) => handleAssignDev(p.id, e.target.value)}
-                        title="Assigner un développeur"
-                      >
-                        <option value="">👤 Assigner...</option>
-                        {EQUIPE.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
+                  {/* LIGNES DES PROSPECTS */}
+                  {columnProspects.map(p => (
+                    <tr key={p.id} className={`transition-colors hover:bg-muted/10 ${p.actif === false ? 'opacity-70 bg-muted/5' : ''}`}>
                       
-                      <div className="flex items-center gap-1 shrink-0">
-                        {p.actif !== false && (
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10" title="Envoyer un document" onClick={() => handleOpenDocModal(p)}>
-                            <Send className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        {p.actif !== false && (
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10" title="Créer un rappel" onClick={() => handleOpenMission(p)}>
-                            <CalendarPlus className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10" title="Historique" onClick={() => handleOpenHistory(p)}>
-                          <ClipboardList className="h-3.5 w-3.5" />
-                        </Button>
-                        
-                        <select className="text-[10px] bg-muted/50 border border-border rounded p-1 outline-none text-muted-foreground w-16" value={p.statut || "Nouveau"} onChange={(e) => handleChangeStatus(p.id, e.target.value)}>
+                      {/* COL 1: Candidat */}
+                      <td className="p-4 align-top">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-bold text-foreground hover:text-primary hover:underline cursor-pointer" onClick={() => handleOpenHistory(p)}>
+                            {p.name}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{p.provenance || "Autre"}</span>
+                          {p.est_franchise && (
+                            <Badge variant="outline" className="w-fit bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] px-1.5 mt-1">👑 Franchisé</Badge>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* COL 2: Contact */}
+                      <td className="p-4 align-top text-xs text-muted-foreground">
+                        <div className="flex flex-col gap-1.5">
+                          {p.email && <span className="flex items-center gap-1.5"><Mail className="h-3 w-3 shrink-0" /> {p.email}</span>}
+                          {p.telephone && <span className="flex items-center gap-1.5"><Phone className="h-3 w-3 shrink-0" /> {p.telephone}</span>}
+                        </div>
+                      </td>
+
+                      {/* COL 3: Projet */}
+                      <td className="p-4 align-top text-xs">
+                        <div className="flex flex-col gap-1.5">
+                          {p.ville ? <span className="flex items-center gap-1.5 font-medium"><MapPin className="h-3.5 w-3.5 text-primary" /> {p.ville}</span> : <span className="text-muted-foreground italic">Non défini</span>}
+                          <span className="text-muted-foreground ml-5">Apport : <b className="text-foreground">{p.apport ? formatEuro(p.apport) : "-"}</b></span>
+                        </div>
+                      </td>
+
+                      {/* COL 4: Développeur */}
+                      <td className="p-4 align-top">
+                        <select 
+                          className="w-full text-xs bg-background border border-border rounded p-1.5 outline-none text-muted-foreground hover:border-primary transition" 
+                          value={p.developpeur_assigne || ""} 
+                          onChange={(e) => handleAssignDev(p.id, e.target.value)}
+                        >
+                          <option value="">👤 Assigner...</option>
+                          {EQUIPE.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </td>
+
+                      {/* COL 5: Statut */}
+                      <td className="p-4 align-top">
+                        <select 
+                          className={`w-full text-xs border rounded p-1.5 outline-none transition font-medium ${
+                            p.statut === "Validé" ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" :
+                            p.statut === "Perdu" || p.statut === "Non qualifié" ? "bg-red-500/10 text-red-500 border-red-500/30" :
+                            "bg-muted/50 border-border text-foreground hover:border-primary"
+                          }`}
+                          value={p.statut || "Nouveau"} 
+                          onChange={(e) => handleChangeStatus(p.id, e.target.value)}
+                        >
                           {COLUMNS.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground" onClick={() => handleEdit(p)}><Pencil className="h-3 w-3" /></Button>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10" onClick={() => handleDelete(p.id)}><Trash2 className="h-3 w-3" /></Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })}
+
+                        {/* AFFICHAGE DU MOTIF DE PERTE */}
+                        {(p.statut === "Perdu" || p.statut === "Non qualifié") && p.raison_statut && (
+                          <div className="mt-2 text-[10px] text-red-400 border-l-2 border-red-500/30 pl-2 italic leading-tight">
+                            Motif : {p.raison_statut}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* COL 6: Actions */}
+                      <td className="p-4 align-top text-right">
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          {p.actif !== false && (
+                            <>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10" title="Envoyer email (Gmail)" onClick={() => handleOpenDocModal(p)}>
+                                <Send className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10" title="Créer un rappel" onClick={() => handleOpenMission(p)}>
+                                <CalendarPlus className="h-4 w-4" />
+                              </Button>
+                              {/* BOUTON PASSER EN RECHERCHE EMPLACEMENT */}
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10" title="Transférer en Recherche d'Emplacement" onClick={() => handlePasserEnRecherche(p)}>
+                                <Building2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10" title="Historique" onClick={() => handleOpenHistory(p)}>
+                            <ClipboardList className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground" onClick={() => handleEdit(p)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10" onClick={() => handleDelete(p.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
 
-      {/* MODAL : ENVOI DE DOCUMENT */}
+      {/* --- RESTE DES MODALES IDENTIQUES (AJOUT/EDITION, MISSIONS, DOCS, HISTORIQUE) --- */}
+
       {showDocModal && selectedProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl border-t-4 border-t-violet-500">
             <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
               <div>
-                <h3 className="text-md font-bold text-foreground">Envoyer un document</h3>
+                <h3 className="text-md font-bold text-foreground">Envoyer un document (Gmail)</h3>
                 <p className="text-xs text-muted-foreground">À : {selectedProspect.email || "Aucune adresse e-mail renseignée"}</p>
               </div>
               <button onClick={() => setShowDocModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
@@ -412,7 +459,7 @@ export function ProspectsPipeline() {
                 </div>
                 <div className="flex flex-col gap-2 pt-4 border-t border-border">
                   <Button onClick={handleSendDocument} className="w-full bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold">
-                    <Send className="mr-2 h-3.5 w-3.5" /> Ouvrir la messagerie & Tracer l'envoi
+                    <Send className="mr-2 h-3.5 w-3.5" /> Ouvrir Gmail & Tracer l'envoi
                   </Button>
                   <Button variant="outline" onClick={() => setShowDocModal(false)} className="w-full text-xs">Annuler</Button>
                 </div>
@@ -422,7 +469,6 @@ export function ProspectsPipeline() {
         </div>
       )}
 
-      {/* MODAL : HISTORIQUE */}
       {showHistoryModal && historyProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl flex flex-col max-h-[80vh]">
@@ -474,7 +520,6 @@ export function ProspectsPipeline() {
         </div>
       )}
 
-      {/* MODAL : CREATION MISSION / RDV */}
       {showMissionModal && selectedProspect && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl border-t-4 border-t-amber-500">
@@ -547,7 +592,6 @@ export function ProspectsPipeline() {
         </div>
       )}
 
-      {/* MODAL : EDITER PROSPECT */}
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
