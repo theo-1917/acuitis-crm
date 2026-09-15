@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 
-const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris"]
+const EQUIPE = ["Kevin Lachant", "Theo Evenor", "Arthur Fougeris", "Stéphane CEZAR"]
 
 type Mission = {
   id: number
