@@ -6,7 +6,27 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 
-type Employee = { id: number; role: string; netMonthly: number; type: "1.44" | "1.33"; isARE: boolean; startYear: number }
+// Configuration des profils RH (Taux de conversion Net -> Brut, et Multiplicateur de coût employeur)
+const HR_PROFILES = {
+  "salarie": { netToBrut: 1 / 0.78, costFromNet: 1.44 },
+  "tns": { netToBrut: 1, costFromNet: 1.33 },
+  "prestation": { netToBrut: 1, costFromNet: 1.0 },
+  "alternant": { netToBrut: 1, costFromNet: 1.05 }
+}
+
+type EmployeeType = keyof typeof HR_PROFILES
+
+type Employee = { 
+  id: number; 
+  role: string; 
+  type: EmployeeType;
+  netMonthly: number; 
+  brutMonthly: number;
+  startYear: number;
+  isARE: boolean; 
+  isMiTemps: boolean;
+  primeY1: number;
+}
 
 export function RoiSimulator() {
   // === ÉTATS : HYPOTHÈSES GÉNÉRALES ===
@@ -50,13 +70,33 @@ export function RoiSimulator() {
 
   // === ÉTATS : RH (SALAIRES) ===
   const [employees, setEmployees] = useState<Employee[]>([
-    { id: 1, role: "Opticien / Directeur", netMonthly: 2500, type: "1.33", isARE: true, startYear: 1 },
-    { id: 2, role: "Audioprothésiste", netMonthly: 3000, type: "1.44", isARE: false, startYear: 1 }
+    { id: 1, role: "Opticien / Directeur", type: "tns", netMonthly: 2500, brutMonthly: 2500, startYear: 1, isARE: true, isMiTemps: false, primeY1: 0 },
+    { id: 2, role: "Audioprothésiste", type: "salarie", netMonthly: 3000, brutMonthly: Math.round(3000 / 0.78), startYear: 1, isARE: false, isMiTemps: false, primeY1: 0 }
   ])
 
-  const addEmployee = () => setEmployees([...employees, { id: Date.now(), role: "Opticien", netMonthly: 2000, type: "1.44", isARE: false, startYear: 1 }])
+  const addEmployee = () => setEmployees([...employees, { id: Date.now(), role: "Nouvel employé", type: "salarie", netMonthly: 2000, brutMonthly: Math.round(2000 / 0.78), startYear: 1, isARE: false, isMiTemps: false, primeY1: 0 }])
   const removeEmployee = (id: number) => setEmployees(employees.filter(e => e.id !== id))
-  const updateEmployee = (id: number, field: string, value: any) => setEmployees(employees.map(e => e.id === id ? { ...e, [field]: value } : e))
+  
+  // Fonction Intelligente de mise à jour (Synchronise le Brut et le Net en direct)
+  const handleEmployeeChange = (id: number, field: keyof Employee, value: any) => {
+    setEmployees(employees.map(emp => {
+      if (emp.id !== id) return emp
+      const newEmp = { ...emp, [field]: value } as Employee
+      const profile = HR_PROFILES[newEmp.type]
+
+      if (field === 'netMonthly') {
+        newEmp.brutMonthly = Math.round(Number(value) * profile.netToBrut)
+      } else if (field === 'brutMonthly') {
+        newEmp.netMonthly = Math.round(Number(value) / profile.netToBrut)
+      } else if (field === 'type') {
+        // Si on change le type, on recalcule le Brut à partir du Net actuel
+        const newProfile = HR_PROFILES[newEmp.type]
+        newEmp.brutMonthly = Math.round(newEmp.netMonthly * newProfile.netToBrut)
+      }
+
+      return newEmp
+    }))
+  }
 
   // ==========================================
   // MOTEUR DE CALCUL MATHÉMATIQUE
@@ -94,11 +134,23 @@ export function RoiSimulator() {
   const dotationsAmortissements = (travaux + fraisArchi + brokers + debours + materielHorsLeasing + fraisJuridiques + autresFraisInvest + droitEntree) / 7
   const leasingAnnuel = materielLeasing / 5
   
+  // CALCUL DES SALAIRES DYNAMIQUE
   const calcSalaires = (yearIdx: number) => {
     return employees.reduce((tot, emp) => {
       if (yearIdx < emp.startYear) return tot // Pas encore embauché
-      if (yearIdx === emp.startYear && emp.isARE) return tot // 1ère année d'embauche gratuite si ARE
-      return tot + ((emp.netMonthly * 12) * parseFloat(emp.type))
+
+      let baseCost = (emp.netMonthly * 12) * HR_PROFILES[emp.type].costFromNet
+      if (emp.isMiTemps) baseCost *= 0.5 // Divise par 2 si mi-temps
+
+      if (yearIdx === emp.startYear && emp.isARE) {
+        baseCost = 0 // Gratuit la première année
+      }
+
+      if (yearIdx === emp.startYear) {
+        baseCost += emp.primeY1 || 0 // Ajout prime embauche ou déduction aide état (si négatif)
+      }
+
+      return tot + baseCost
     }, 0)
   }
 
@@ -164,70 +216,24 @@ export function RoiSimulator() {
   const fK = (val: number) => Math.round(val / 1000)
 
   // Lancement de l'impression
-  const handlePrint = () => {
-    window.print();
-  }
+  const handlePrint = () => window.print()
 
   return (
     <>
-      {/* 
-        LE CODE MAGIQUE POUR L'IMPRESSION 
-        Il cache tout le site sauf le simulateur, enlève les limites de hauteur, et force les couleurs.
-      */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          /* Cacher tout le reste de l'application (Menu, Header...) */
-          body * {
-            visibility: hidden;
-          }
-          /* Rendre visible uniquement notre section de ROI */
-          #roi-print-section, #roi-print-section * {
-            visibility: visible;
-          }
-          /* Placer le simulateur tout en haut, hors des contraintes du site */
-          #roi-print-section {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 10px;
-          }
-          /* Forcer le navigateur à imprimer sur plusieurs pages (désactiver le overflow: hidden) */
-          html, body, main, div {
-            height: auto !important;
-            max-height: none !important;
-            overflow: visible !important;
-            position: static !important;
-          }
-          /* Forcer l'impression des couleurs d'arrière-plan (très important pour les tableaux) */
-          * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            color: black !important; /* Texte noir par défaut pour lisibilité PDF */
-          }
-          /* Conserver quelques couleurs essentielles */
+          body * { visibility: hidden; }
+          #roi-print-section, #roi-print-section * { visibility: visible; }
+          #roi-print-section { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 10px; }
+          html, body, main, div { height: auto !important; max-height: none !important; overflow: visible !important; position: static !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: black !important; }
           .text-emerald-500 { color: #10b981 !important; }
           .text-red-400, .text-red-500 { color: #ef4444 !important; }
           .text-blue-500 { color: #3b82f6 !important; }
           .text-amber-500 { color: #f59e0b !important; }
           .text-primary { color: #4f46e5 !important; }
-          
-          /* Nettoyer l'apparence des champs (inputs) pour qu'ils ressemblent à du texte normal */
-          input, select, textarea {
-            border: none !important;
-            background: transparent !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            box-shadow: none !important;
-            font-weight: bold !important;
-            -webkit-appearance: none !important;
-            appearance: none !important;
-          }
-          /* Cacher les curseurs (range) et les éléments inutiles à l'impression */
-          input[type="range"], .print-hide {
-            display: none !important;
-          }
+          input, select, textarea { border: none !important; background: transparent !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; font-weight: bold !important; -webkit-appearance: none !important; appearance: none !important; }
+          input[type="range"], .print-hide { display: none !important; }
         }
       `}} />
 
@@ -261,45 +267,29 @@ export function RoiSimulator() {
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 print:block">
           
-          {/* COLONNE GAUCHE : LES INPUTS (7 colonnes) */}
+          {/* COLONNE GAUCHE : LES INPUTS */}
           <div className="xl:col-span-7 flex flex-col gap-5 print:mb-8">
             
             {/* 1. PRÉVISIONS CA & MARGE */}
             <div className="rounded-xl border border-border bg-card p-5 print:shadow-none print:border-gray-200">
               <h3 className="font-semibold text-foreground text-sm flex items-center gap-2 border-b border-border pb-3 mb-4"><TrendingUp className="h-4 w-4 text-primary print-hide" /> 1. Prévisions CA & Marge</h3>
-              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
-                
                 <div className="space-y-4">
                   <div className="bg-blue-500/5 border border-blue-500/20 p-3 rounded-lg print:border-gray-200 print:bg-white">
                     <span className="text-[11px] font-bold text-blue-500 mb-2 block">CA Optique (TVA 20%)</span>
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Montant HT</label>
-                        <Input type="number" value={Math.round(caOptiqueHT)} onChange={e => setCaOptiqueHT(Number(e.target.value))} className="text-xs font-semibold text-blue-500" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Montant TTC</label>
-                        <Input type="number" value={Math.round(caOptiqueHT * 1.20)} onChange={e => setCaOptiqueHT(Number(e.target.value) / 1.20)} className="text-xs border-blue-500/30" />
-                      </div>
+                      <div><label className="text-[10px] text-muted-foreground">Montant HT</label><Input type="number" value={Math.round(caOptiqueHT)} onChange={e => setCaOptiqueHT(Number(e.target.value))} className="text-xs font-semibold text-blue-500" /></div>
+                      <div><label className="text-[10px] text-muted-foreground">Montant TTC</label><Input type="number" value={Math.round(caOptiqueHT * 1.20)} onChange={e => setCaOptiqueHT(Number(e.target.value) / 1.20)} className="text-xs border-blue-500/30" /></div>
                     </div>
                   </div>
-
                   <div className="bg-emerald-500/5 border border-emerald-500/20 p-3 rounded-lg print:border-gray-200 print:bg-white">
                     <span className="text-[11px] font-bold text-emerald-500 mb-2 block">CA Audition (TVA 5.5%)</span>
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Montant HT</label>
-                        <Input type="number" value={Math.round(caAudioHT)} onChange={e => setCaAudioHT(Number(e.target.value))} className="text-xs font-semibold text-emerald-500" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Montant TTC</label>
-                        <Input type="number" value={Math.round(caAudioHT * 1.055)} onChange={e => setCaAudioHT(Number(e.target.value) / 1.055)} className="text-xs border-emerald-500/30" />
-                      </div>
+                      <div><label className="text-[10px] text-muted-foreground">Montant HT</label><Input type="number" value={Math.round(caAudioHT)} onChange={e => setCaAudioHT(Number(e.target.value))} className="text-xs font-semibold text-emerald-500" /></div>
+                      <div><label className="text-[10px] text-muted-foreground">Montant TTC</label><Input type="number" value={Math.round(caAudioHT * 1.055)} onChange={e => setCaAudioHT(Number(e.target.value) / 1.055)} className="text-xs border-emerald-500/30" /></div>
                     </div>
                   </div>
                 </div>
-                
                 <div className="bg-muted/20 p-4 rounded-lg border border-border flex flex-col justify-center print:bg-white print:border-gray-200">
                   <label className="text-xs font-bold text-foreground mb-3 flex items-center justify-between">
                     <span className="flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-primary print-hide"/> Marge Brute :</span>
@@ -358,37 +348,65 @@ export function RoiSimulator() {
                 <div><label className="text-[11px] text-amber-500 mb-1 block">Abattement Loyer Y1 (€)</label><Input type="number" value={abattementY1} onChange={e => setAbattementY1(Number(e.target.value))} className="text-xs border-amber-500/30 bg-amber-500/5 print:bg-white" /></div>
                 <div><label className="text-[11px] text-amber-500 mb-1 block">Abattement Loyer Y2 (€)</label><Input type="number" value={abattementY2} onChange={e => setAbattementY2(Number(e.target.value))} className="text-xs border-amber-500/30 bg-amber-500/5 print:bg-white" /></div>
               </div>
-              
               <div className="bg-muted/30 p-3 rounded flex flex-col justify-center border border-border print:bg-white">
                 <span className="text-[11px] text-foreground font-semibold">Frais Variables Acuitis (Verrouillés dans le système)</span>
                 <span className="text-xs text-muted-foreground">1% Royalties (Min 5k) + 6% Com (Nat/Loc) + 8% Frais Généraux (Fixes/Autres)</span>
               </div>
             </div>
 
-            {/* 5. RESSOURCES HUMAINES */}
+            {/* 5. RESSOURCES HUMAINES AVEC SYNCHRONISATION BRUT/NET */}
             <div className="rounded-xl border border-border bg-card p-5 print:shadow-none print:border-gray-200 print:mt-6">
               <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
-                <h3 className="font-semibold text-foreground text-sm flex items-center gap-2"><Users className="h-4 w-4 text-primary print-hide" /> 5. Salaires & RH</h3>
+                <h3 className="font-semibold text-foreground text-sm flex items-center gap-2"><Users className="h-4 w-4 text-primary print-hide" /> 5. Salaires & RH (Net et Brut liés)</h3>
                 <Button variant="outline" size="sm" onClick={addEmployee} className="h-7 text-xs print-hide"><Plus className="mr-1 h-3 w-3" /> Ajouter</Button>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {employees.map((emp) => (
-                  <div key={emp.id} className="flex flex-wrap md:flex-nowrap items-center gap-2 bg-muted/20 p-2 rounded-lg border border-border print:bg-white print:p-0 print:border-b-0 print:border-transparent">
-                    <Input value={emp.role} onChange={e => updateEmployee(emp.id, "role", e.target.value)} placeholder="Rôle" className="w-full md:w-1/3 text-xs h-8" />
+                  <div key={emp.id} className="flex flex-col gap-2 bg-muted/20 p-3 rounded-lg border border-border print:bg-white print:p-0 print:border-b print:border-0 print:border-gray-200">
                     
-                    <select value={emp.startYear} onChange={e => updateEmployee(emp.id, "startYear", Number(e.target.value))} className="w-full md:w-20 h-8 rounded-md border border-input bg-background px-2 text-[11px] text-amber-600 font-semibold print:text-black">
-                      <option value={1}>Début Y1</option><option value={2}>Début Y2</option><option value={3}>Début Y3</option><option value={4}>Début Y4</option><option value={5}>Début Y5</option>
-                    </select>
+                    <div className="flex flex-wrap md:flex-nowrap items-center gap-2">
+                      <Input value={emp.role} onChange={e => handleEmployeeChange(emp.id, "role", e.target.value)} placeholder="Rôle" className="w-full md:w-1/3 text-xs h-8 print:border-none print:p-0 font-semibold text-foreground" />
+                      
+                      <select value={emp.startYear} onChange={e => handleEmployeeChange(emp.id, "startYear", Number(e.target.value))} className="w-full md:w-20 h-8 rounded-md border border-input bg-background px-2 text-[11px] text-amber-600 font-semibold print:border-none print:p-0 print:text-black">
+                        <option value={1}>Début Y1</option><option value={2}>Début Y2</option><option value={3}>Début Y3</option><option value={4}>Début Y4</option><option value={5}>Début Y5</option>
+                      </select>
 
-                    <Input type="number" value={emp.netMonthly} onChange={e => updateEmployee(emp.id, "netMonthly", Number(e.target.value))} placeholder="Salaire Net Mensuel" className="w-full md:w-1/5 text-xs h-8" />
-                    <select value={emp.type} onChange={e => updateEmployee(emp.id, "type", e.target.value)} className="w-full md:w-1/5 h-8 rounded-md border border-input bg-background px-2 text-[11px]">
-                      <option value="1.44">Salarié (x1.44)</option><option value="1.33">TNS (x1.33)</option>
-                    </select>
-                    <label className="flex items-center gap-1.5 text-[10px] whitespace-nowrap cursor-pointer px-2">
-                      <input type="checkbox" checked={emp.isARE} onChange={e => updateEmployee(emp.id, "isARE", e.target.checked)} className="accent-primary" />
-                      ARE <span className="hidden lg:inline print-hide">(Gratuit Y1)</span>
-                    </label>
-                    <Button variant="ghost" size="sm" onClick={() => removeEmployee(emp.id)} className="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10 ml-auto print-hide"><Trash2 className="h-3.5 w-3.5" /></Button>
+                      <select value={emp.type} onChange={e => handleEmployeeChange(emp.id, "type", e.target.value)} className="w-full md:w-1/4 h-8 rounded-md border border-input bg-background px-2 text-[11px] print:border-none print:p-0">
+                        <option value="salarie">Salarié (Charges x1.44)</option>
+                        <option value="tns">TNS (Charges x1.33)</option>
+                        <option value="prestation">Prestation (Facture x1.0)</option>
+                        <option value="alternant">Alternant (Charges x1.05)</option>
+                      </select>
+
+                      {/* SALAIRES NET ET BRUT */}
+                      <div className="flex items-center gap-1 w-full md:w-1/5">
+                        <span className="text-[10px] text-muted-foreground w-6">Net:</span>
+                        <Input type="number" value={emp.netMonthly || ""} onChange={e => handleEmployeeChange(emp.id, "netMonthly", Number(e.target.value))} placeholder="Net" className="text-xs h-8 print:border-none print:p-0 font-medium" />
+                      </div>
+                      <div className="flex items-center gap-1 w-full md:w-1/5">
+                        <span className="text-[10px] text-muted-foreground w-6">Brut:</span>
+                        <Input type="number" value={emp.brutMonthly || ""} onChange={e => handleEmployeeChange(emp.id, "brutMonthly", Number(e.target.value))} placeholder="Brut" className="text-xs h-8 print:border-none print:p-0 font-medium text-primary" />
+                      </div>
+
+                      <Button variant="ghost" size="sm" onClick={() => removeEmployee(emp.id)} className="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10 ml-auto shrink-0 print-hide"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-4 px-1 pt-1 border-t border-border/50">
+                      <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                        <input type="checkbox" checked={emp.isMiTemps} onChange={e => handleEmployeeChange(emp.id, "isMiTemps", e.target.checked)} className="accent-primary" />
+                        Mi-temps <span className="text-muted-foreground">(Coût / 2)</span>
+                      </label>
+
+                      <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                        <input type="checkbox" checked={emp.isARE} onChange={e => handleEmployeeChange(emp.id, "isARE", e.target.checked)} className="accent-primary" />
+                        ARE <span className="hidden lg:inline print-hide">(Gratuit 1ère année d'embauche)</span>
+                      </label>
+
+                      <div className="flex items-center gap-2 ml-auto">
+                        <span className="text-[10px] text-muted-foreground">Prime ou Aide 1ère année (€) :</span>
+                        <Input type="number" value={emp.primeY1 || 0} onChange={e => handleEmployeeChange(emp.id, "primeY1", Number(e.target.value))} className="w-24 h-7 text-[11px] print:border-none print:p-0" title="+ (Positif) = Coût Prime.  - (Négatif) = Subvention État (ex: -6000€ Aide alternance)" placeholder="ex: -6000" />
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -396,7 +414,7 @@ export function RoiSimulator() {
 
           </div>
 
-          {/* COLONNE DROITE : LES RÉSULTATS (5 colonnes) */}
+          {/* COLONNE DROITE : LES RÉSULTATS */}
           <div className="xl:col-span-5 flex flex-col gap-5 print:block print:mt-12" style={{ pageBreakBefore: 'always' }}>
             
             {/* ENCART SEUIL RENTABILITÉ DÉTAILLÉ */}
